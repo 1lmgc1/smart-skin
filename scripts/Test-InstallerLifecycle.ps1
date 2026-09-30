@@ -42,6 +42,46 @@ try {
     New-ItemProperty -Path $OldRegistryKey -Name "Name" -PropertyType String -Value "Smart Skin" -Force | Out-Null
     New-ItemProperty -Path $OldRegistryKey -Name "FileName" -PropertyType String -Value (Join-Path $OldDirectory "SmartSkin.Rhino8.rhp") -Force | Out-Null
 
+    Write-Host "SMARTSKIN_INSTALLER_TEST PHASE | launcher-path-with-spaces"
+    $LauncherProbeRoot = Join-Path $TestRoot "launcher probe"
+    $LauncherProbeResult = Join-Path $LauncherProbeRoot "package-root.txt"
+    New-Item -ItemType Directory -Path $LauncherProbeRoot -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PackageRoot "INSTALL.cmd") -Destination $LauncherProbeRoot
+    @'
+[CmdletBinding()]
+param([Parameter(Mandatory = $true)][string]$PackageRoot)
+
+$ErrorActionPreference = "Stop"
+$ResolvedPackageRoot = (Resolve-Path -LiteralPath $PackageRoot).Path
+Set-Content -LiteralPath (Join-Path $PSScriptRoot "package-root.txt") -Value $ResolvedPackageRoot -Encoding UTF8
+'@ | Set-Content -LiteralPath (Join-Path $LauncherProbeRoot "Install-SmartSkin.ps1") -Encoding UTF8
+
+    $PreviousNoPause = $env:SMARTSKIN_INSTALL_NO_PAUSE
+    try {
+        $env:SMARTSKIN_INSTALL_NO_PAUSE = "1"
+        Push-Location $LauncherProbeRoot
+        try {
+            & $env:ComSpec /d /c "INSTALL.cmd"
+            if ($LASTEXITCODE -ne 0) {
+                throw "INSTALL.cmd launcher probe failed with exit code $LASTEXITCODE."
+            }
+        }
+        finally {
+            Pop-Location
+        }
+    }
+    finally {
+        $env:SMARTSKIN_INSTALL_NO_PAUSE = $PreviousNoPause
+    }
+
+    $ObservedPackageRoot = (Get-Content -LiteralPath $LauncherProbeResult -Raw).Trim()
+    if (-not [string]::Equals(
+        [System.IO.Path]::GetFullPath($ObservedPackageRoot).TrimEnd('\'),
+        [System.IO.Path]::GetFullPath($LauncherProbeRoot).TrimEnd('\'),
+        [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "INSTALL.cmd did not preserve a package path containing spaces."
+    }
+
     Write-Host "SMARTSKIN_INSTALLER_TEST PHASE | migrate-manual-install"
     & (Join-Path $PackageRoot "Install-SmartSkin.ps1") `
         -PackageRoot $PackageRoot `

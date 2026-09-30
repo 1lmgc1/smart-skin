@@ -27,6 +27,7 @@ Correct one Rhino-facing classification defect found during the P01 field test w
 - Update build identity, CI artifact names and the targeted Rhino field test.
 - Add a per-user `INSTALL.cmd`/`UNINSTALL.cmd` lifecycle. Updates use the stable `%LOCALAPPDATA%\SmartSkin\Rhino8\current` path, replace the registered build and remove known binaries from the previously registered Smart Skin location.
 - Add a Windows CI lifecycle test covering migration from a manually registered artifact, preservation of unrelated files, repeat update cleanup, registry replacement and uninstall.
+- Make `INSTALL.cmd` pass its package directory without a quote-corrupting trailing backslash and exercise the launcher from a temporary path containing spaces.
 
 ## Invariants
 
@@ -58,6 +59,6 @@ Correct one Rhino-facing classification defect found during the P01 field test w
 
 ## Verification status
 
-- `VERIFIED`: GitHub Actions runs 4 and 5 restored, built, executed all 11 Core tests and packaged P01F1; all 11 Core tests passed, including the Extrusion regression.
-- `STATICALLY CHECKED`: run 5 reached the real installer and identified an idempotency defect at duplicate-registry cleanup. A braced legacy key may already be absent when cleanup executes. Cleanup now tests the captured key path before removal, while the lifecycle test explicitly requires the legacy braced key to be gone after migration.
-- `NOT VERIFIED`: the corrected Windows installer lifecycle, field-test artifact publication and Rhino 8 behavior require the next GitHub Actions run and P01F1 field test.
+- `VERIFIED`: GitHub Actions run 6 restored, built, packaged, passed all 11 Core tests and completed migration, repeat-update and uninstall lifecycle checks for commit `69bc0a586297d8baae4a12191de26c9aaedc54a6`.
+- `STATICALLY CHECKED`: the first user installation from run 6 exposed a Windows command-line quoting defect before any installation mutation. `INSTALL.cmd` now passes `%~dp0.` and the lifecycle suite includes a launcher probe from a directory containing spaces.
+- `NOT VERIFIED`: the corrected `.cmd` launcher and Rhino 8 behavior require the next GitHub Actions run and P01F1 field test.
