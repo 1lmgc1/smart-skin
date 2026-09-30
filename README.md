@@ -2,7 +2,7 @@
 
 Rhino 8 surface-assistance plug-in. The intended product is a small, dependable command that diagnoses irregular curve/edge frameworks, infers a likely surface strategy, builds candidates and returns a native Rhino result with an explanation.
 
-## Current patch: P01F1 selection-identity fix
+## Current state: P01F1 verified
 
 P00 proved the repository → CI → artifact → Rhino field-test loop and is `VERIFIED` in Rhino 8.18.
 
@@ -29,13 +29,16 @@ SmartSurfaceVersion
 
 Both commands verify that the document object count is unchanged.
 
-P01F1 fixes a field-test regression in the Rhino adapter: selecting an entire
+P01F1 fixed a field-test regression in the Rhino adapter: selecting an entire
 `Extrusion` could be reported as the curve returned by `ObjRef.Curve()` instead
 of as the selected document object. The adapter now uses
 `GeometryComponentIndex` to separate sub-object picks from top-level objects.
 Whole extrusions report as `Extrusion`; a sub-selected Brep edge still reports
 as `BrepEdge`. Item labels include the parent object type and whether Rhino
-returned an object or sub-object component. Geometry remains read-only.
+returned an object or sub-object component. Geometry remains read-only. The
+correction, managed installer lifecycle, cancellation path and restart behavior
+are `VERIFIED` in Rhino 8.18 for field build commit
+`550b74ff9f5bd8953d80c28560a9951d39214d55`.
 
 ## Projects
 
@@ -72,8 +75,8 @@ Extract the artifact, close Rhino and run `INSTALL.cmd`, then follow [`docs/FIEL
 
 1. P00 — reproducible build/load loop (`VERIFIED`).
 2. P01 — read-only GeometryReport/Preflight.
-3. P01F1 — preserve top-level versus sub-object selection identity (current patch).
-4. Router and candidate adapters only after P01F1 is verified in Rhino.
+3. P01F1 — preserve top-level versus sub-object selection identity (`VERIFIED`).
+4. P02 — input topology classification and candidate routing without geometry mutation (next; not started).
 
 ## Data and licensing
 

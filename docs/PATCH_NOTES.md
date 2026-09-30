@@ -59,6 +59,9 @@ Correct one Rhino-facing classification defect found during the P01 field test w
 
 ## Verification status
 
-- `VERIFIED`: GitHub Actions run 6 restored, built, packaged, passed all 11 Core tests and completed migration, repeat-update and uninstall lifecycle checks for commit `69bc0a586297d8baae4a12191de26c9aaedc54a6`.
-- `STATICALLY CHECKED`: the first user installation from run 6 exposed a Windows command-line quoting defect before any installation mutation. `INSTALL.cmd` now passes `%~dp0.` and the lifecycle suite includes a launcher probe from a directory containing spaces.
-- `NOT VERIFIED`: the corrected `.cmd` launcher and Rhino 8 behavior require the next GitHub Actions run and P01F1 field test.
+- `VERIFIED`: GitHub Actions run 7 restored, built, packaged and passed all 11 Core tests for commit `550b74ff9f5bd8953d80c28560a9951d39214d55`.
+- `VERIFIED`: run 7 exercised the actual `INSTALL.cmd` launcher from a path containing spaces, migration from a manual installation, repeat update and uninstall. The lifecycle removed two legacy binaries during the migration case and left no stale registration.
+- `VERIFIED`: the field installer completed at `%LOCALAPPDATA%\SmartSkin\Rhino8\current\SmartSkin.Rhino8.rhp`; Rhino Plug-in Manager showed one enabled and loaded Smart Skin entry, and `SmartSurfaceVersion` reported the expected version and commit after a full restart.
+- `VERIFIED`: Rhino 8.18 field testing reported a whole saved Box as `Extrusion=1` with `object:Extrusion`, a sub-selected edge as `BrepEdge=1` with a `subobject:` label, and `objects=1->1` for both completed reports.
+- `VERIFIED`: cancelling `SmartSurfacePreflight` before selection returned control without changing the saved Box; the following version check reported `objects=1`. Reopening the saved `.3dm` after closing Rhino retained `Extrusion=1` and `objects=1->1`.
+- `NOT VERIFIED`: none within the P01F1 acceptance scope. Surface construction and repair remain intentionally outside this patch.

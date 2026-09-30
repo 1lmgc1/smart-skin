@@ -2,7 +2,7 @@
 
 ## Current state
 
-P00 is `VERIFIED` in Rhino 8.18. P01 passed CI plus curve, near-gap and Brep-edge field checks, but the field test exposed a top-level selection-classification defect: a whole Extrusion could be reported as a Curve. P01F1 contains the read-only adapter correction plus a managed install/update/uninstall lifecycle that removes the previous registered Smart Skin binaries. GitHub Actions run 6 built, packaged, passed all 11 Core tests and passed the complete PowerShell installer lifecycle. The first user launch then exposed a separate `INSTALL.cmd` quoting defect for `%~dp0` before the PowerShell installer performed any mutation. The launcher now passes `%~dp0.` and CI probes it from a path containing spaces. Rhino verification is pending.
+P00 is `VERIFIED` in Rhino 8.18. P01 passed CI plus curve, near-gap and Brep-edge field checks, but its field test exposed a top-level selection-classification defect: a whole Extrusion could be reported as a Curve. P01F1 corrected the adapter and added a managed install/update/uninstall lifecycle. GitHub Actions run 7 built and packaged commit `550b74ff9f5bd8953d80c28560a9951d39214d55`, passed all 11 Core tests, exercised the real `INSTALL.cmd` launcher from a path containing spaces, and passed migration, repeat-update and uninstall checks. Rhino 8.18 field testing then verified the build identity, one active managed registration, whole-Extrusion versus sub-edge identity, cancellation without mutation and classification after closing Rhino and reopening the saved file. P01F1 is `VERIFIED`; P02 has not started.
 
 ## Source of truth
 
@@ -14,7 +14,7 @@ The repository is authoritative for code, workflows, commits and build artifacts
 
 1. Read `README.md`, `AGENTS.md`, `docs/PATCH_NOTES.md` and `docs/FIELD_TEST.md`.
 2. Inspect the latest GitHub Actions run and its exact commit SHA.
-3. Do not begin surface construction until P01F1 has a Rhino field-test result.
+3. Treat P01F1 as the verified read-only baseline; do not reinterpret its field evidence as verification of future construction code.
 4. Preserve the patch discipline: one architectural goal, targeted checks, field test, then the next patch.
 5. Install field-test artifacts only through `INSTALL.cmd`; manual `.rhp` registration is superseded.
 
@@ -22,4 +22,4 @@ The repository is authoritative for code, workflows, commits and build artifacts
 
 P01F1 changes only Rhino selection identity. It uses `ObjRef.GeometryComponentIndex` to distinguish a sub-object from its parent document object before extracting geometry. A whole Box stored as an Extrusion must report `Extrusion=1`; a sub-selected edge must report `BrepEdge=1`.
 
-After P01F1 is verified, the next patch may add input topology classification and candidate routing without yet committing geometry.
+The next patch may add input topology classification and candidate routing without yet committing geometry. Keep candidate generation and document mutation outside that patch unless its objective and acceptance criteria are explicitly revised first.

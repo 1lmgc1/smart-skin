@@ -53,6 +53,13 @@ Close Rhino and run `UNINSTALL.cmd`. A successful uninstall returns `SMARTSKIN_U
 - No completed or cancelled command changes document geometry.
 - Classification remains correct after a full Rhino restart.
 
+## Recorded reference result
+
+P01F1 is `VERIFIED` in Rhino 8.18 for field build commit
+`550b74ff9f5bd8953d80c28560a9951d39214d55`. The completed test covered the
+managed installation, build identity, whole saved Extrusion, sub-selected Brep
+edge, cancellation without an object-count change, and a full Rhino restart.
+
 ## Return this evidence
 
 ```text
