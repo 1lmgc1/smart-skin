@@ -106,6 +106,29 @@ public sealed class GeometryPreflightAnalyzerTests
     }
 
     [Fact]
+    public void Analyze_ValidExtrusion_IsReadyAndRetainsItsType()
+    {
+        var extrusion = new GeometrySnapshot(
+            "extrusion-1",
+            GeometryKind.Extrusion,
+            true,
+            Bounds(0.0, 0.0, 0.0, 100.0, 100.0, 100.0),
+            faceCount: 6,
+            edgeCount: 12,
+            nakedEdgeCount: 0,
+            shortEdgeCount: 0);
+
+        var report = _analyzer.Analyze(
+            new[] { extrusion },
+            new PreflightOptions(0.01));
+
+        Assert.Equal(PreflightStatus.Ready, report.Status);
+        Assert.Equal(1, report.TypeCounts[GeometryKind.Extrusion]);
+        Assert.Contains(report.ToDisplayLines(), line => line == "Types: Extrusion=1");
+        Assert.Contains(report.ToDisplayLines(), line => line.Contains("Extrusion | valid | faces=6 | edges=12"));
+    }
+
+    [Fact]
     public void Analyze_SafetyLimitedSnapshot_DoesNotClaimValidity()
     {
         var curve = new GeometrySnapshot(
@@ -166,7 +189,7 @@ public sealed class GeometryPreflightAnalyzerTests
 
         var line = report.ToMachineLine(identity, 35, 35);
 
-        Assert.StartsWith("SMARTSKIN_P01 PASS", line);
+        Assert.StartsWith("SMARTSKIN_P01F1 PASS", line);
         Assert.Contains("status=READY", line);
         Assert.Contains("selected=1", line);
         Assert.Contains("valid=1", line);

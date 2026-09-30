@@ -11,6 +11,7 @@ public enum GeometryKind
     Point,
     Surface,
     Brep,
+    Extrusion,
     Other
 }
 

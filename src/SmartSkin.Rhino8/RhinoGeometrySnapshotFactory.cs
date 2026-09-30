@@ -21,7 +21,12 @@ internal static class RhinoGeometrySnapshotFactory
 
         var objectId = reference.ObjectId.ToString("N");
         var shortId = objectId.Length > 8 ? objectId.Substring(0, 8) : objectId;
-        return $"selection[{selectionIndex}]/{shortId}";
+        var parentType = reference.Object()?.ObjectType.ToString() ?? "Unknown";
+        var componentIndex = reference.GeometryComponentIndex;
+        var scope = componentIndex.ComponentIndexType == ComponentIndexType.InvalidType
+            ? $"object:{parentType}"
+            : $"subobject:{componentIndex.ComponentIndexType}[{componentIndex.Index}]@{parentType}";
+        return $"selection[{selectionIndex}]/{shortId}/{scope}";
     }
 
     public static GeometrySnapshot Create(ObjRef reference, int selectionIndex, double absoluteTolerance)
@@ -32,16 +37,53 @@ internal static class RhinoGeometrySnapshotFactory
         }
 
         var label = CreateLabel(reference, selectionIndex);
-        var selectedCurve = reference.Curve();
-        if (selectedCurve is not null)
+        var componentIndex = reference.GeometryComponentIndex;
+        if (componentIndex.ComponentIndexType != ComponentIndexType.InvalidType)
         {
-            var kind = selectedCurve is BrepEdge ? GeometryKind.BrepEdge : GeometryKind.Curve;
-            return FromCurve(label, kind, selectedCurve, absoluteTolerance);
+            return FromSubObject(reference, label, absoluteTolerance);
+        }
+
+        var geometry = reference.Object()?.Geometry ?? reference.Geometry();
+        return FromTopLevelGeometry(label, geometry, absoluteTolerance);
+    }
+
+    private static GeometrySnapshot FromSubObject(
+        ObjRef reference,
+        string label,
+        double absoluteTolerance)
+    {
+        var edge = reference.Edge();
+        if (edge is not null)
+        {
+            return FromCurve(label, GeometryKind.BrepEdge, edge, absoluteTolerance);
+        }
+
+        var face = reference.Face();
+        if (face is not null)
+        {
+            return FromSurface(label, face, absoluteTolerance);
         }
 
         var geometry = reference.Geometry();
         return geometry switch
         {
+            Curve curve => FromCurve(label, GeometryKind.Curve, curve, absoluteTolerance),
+            Rhino.Geometry.Point point => FromPoint(label, point),
+            Brep brep => FromBrep(label, brep, absoluteTolerance),
+            Surface surface => FromSurface(label, surface, absoluteTolerance),
+            _ => FromOther(label, geometry)
+        };
+    }
+
+    private static GeometrySnapshot FromTopLevelGeometry(
+        string label,
+        GeometryBase? geometry,
+        double absoluteTolerance)
+    {
+        return geometry switch
+        {
+            Extrusion extrusion => FromExtrusion(label, extrusion, absoluteTolerance),
+            Curve curve => FromCurve(label, GeometryKind.Curve, curve, absoluteTolerance),
             Rhino.Geometry.Point point => FromPoint(label, point),
             Brep brep => FromBrep(label, brep, absoluteTolerance),
             Surface surface => FromSurface(label, surface, absoluteTolerance),
@@ -132,7 +174,8 @@ internal static class RhinoGeometrySnapshotFactory
     private static GeometrySnapshot FromBrep(
         string label,
         Brep brep,
-        double absoluteTolerance)
+        double absoluteTolerance,
+        GeometryKind kind = GeometryKind.Brep)
     {
         var faceCount = brep.Faces.Count;
         var edgeCount = brep.Edges.Count;
@@ -140,7 +183,7 @@ internal static class RhinoGeometrySnapshotFactory
         {
             return new GeometrySnapshot(
                 label,
-                GeometryKind.Brep,
+                kind,
                 null,
                 ToBounds(brep, accurate: false),
                 faceCount: faceCount,
@@ -167,7 +210,7 @@ internal static class RhinoGeometrySnapshotFactory
 
         return new GeometrySnapshot(
             label,
-            GeometryKind.Brep,
+            kind,
             brep.IsValid,
             ToBounds(brep, accurate: true),
             faceCount: faceCount,
@@ -176,8 +219,38 @@ internal static class RhinoGeometrySnapshotFactory
             shortEdgeCount: shortEdgeCount);
     }
 
-    private static GeometrySnapshot FromOther(string label, GeometryBase geometry)
+    private static GeometrySnapshot FromExtrusion(
+        string label,
+        Extrusion extrusion,
+        double absoluteTolerance)
     {
+        var brep = extrusion.ToBrep();
+        if (brep is not null)
+        {
+            return FromBrep(
+                label,
+                brep,
+                absoluteTolerance,
+                GeometryKind.Extrusion);
+        }
+
+        return new GeometrySnapshot(
+            label,
+            GeometryKind.Extrusion,
+            extrusion.IsValid,
+            ToBounds(extrusion, accurate: false),
+            sourceProblem: "Rhino could not expose this extrusion as a Brep for bounded preflight checks.");
+    }
+
+    private static GeometrySnapshot FromOther(string label, GeometryBase? geometry)
+    {
+        if (geometry is null)
+        {
+            return GeometrySnapshot.Failed(
+                label,
+                "Rhino returned no geometry for the selected object reference.");
+        }
+
         return new GeometrySnapshot(
             label,
             GeometryKind.Other,

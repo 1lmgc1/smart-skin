@@ -1,50 +1,58 @@
-# P01 GeometryReport/Preflight — patch notes
+# P01F1 Selection Identity — patch notes
 
-Version: `0.0.2-p01`
+Version: `0.0.3-p01f1`
 
 ## Goal
 
-Turn selected Rhino geometry into a bounded, read-only preflight report before any surface solver or automatic repair is introduced.
+Correct one Rhino-facing classification defect found during the P01 field test without widening the read-only GeometryReport/Preflight scope.
+
+## Field-test finding
+
+- A sub-selected Box edge correctly reported `BrepEdge=1`.
+- Selecting the whole Box, stored by Rhino as an `Extrusion`, reported a closed `Curve` with the extrusion profile length.
+- The document remained unchanged, so this is an input-identity defect rather than a geometry mutation.
+
+## Cause
+
+`RhinoGeometrySnapshotFactory` called `ObjRef.Curve()` before determining whether the reference represented a top-level object or a sub-object. Rhino can expose a curve associated with an Extrusion reference, so the helper result was mistaken for the user's selected document object.
 
 ## Included
 
-- New `SmartSurfacePreflight` Rhino command.
-- Selection of curves, Brep edges, points, surfaces, extrusions and polysurfaces.
-- Rhino-independent `SmartSkin.Core.Preflight` snapshots, analyzer, issue codes and report formatter.
-- Checks for invalid geometry, invalid or oversized tolerance, degenerate/short curves, short Brep edges, naked edges, high span count and endpoint gaps between 1x and 10x document tolerance.
-- Per-item summary, selection scale and machine-readable result.
-- Hard bounds of 256 selected elements, 64 issue records and 24 displayed item lines.
-- Deep metrics are skipped with `P01_ANALYSIS_LIMITED` instead of forced when a curve/surface exceeds 1000 spans or a Brep exceeds 2000 faces / 5000 edges.
-- Unit tests for READY/WARNING/BLOCKED reports, near gaps, Brep warnings, selection bounds and machine-line stability.
+- Use `ObjRef.GeometryComponentIndex` to separate sub-object references from parent-object references before geometry extraction.
+- Resolve top-level geometry from `RhinoObject.Geometry` instead of probing `ObjRef.Curve()` first.
+- Preserve explicit `BrepEdge` handling for sub-selected edges.
+- Add `GeometryKind.Extrusion` and bounded Brep-derived face/edge metrics for whole Extrusions.
+- Include `object:<type>` or `subobject:<component>@<parent-type>` in each selection label so Selection Filter behavior is explicit.
+- Add a Core regression test proving that an Extrusion remains typed as `Extrusion` in the report.
+- Update build identity, CI artifact names and the targeted Rhino field test.
 
 ## Invariants
 
-- P01 does not add, delete, replace, trim, join, transform or otherwise edit document geometry.
-- A successful report ends with `SMARTSKIN_P01 PASS` even when the input status is `WARNING` or `BLOCKED`; `PASS` means the analyzer completed, not that the geometry is clean.
-- Document object count is checked before and after the command.
-- Unsupported or failed snapshots become explicit diagnostics instead of escaping the command as a crash.
-- Selection and output are bounded; no network access or cloud dependency is used.
-- RhinoCommon remains a compile-time dependency and is not bundled.
+- P01F1 does not add, delete, replace, trim, join, transform or otherwise edit document geometry.
+- A whole Box stored as an Extrusion must not be downgraded to its profile curve.
+- A sub-selected Brep edge must remain `BrepEdge`.
+- Cancellation returns control to Rhino without geometry changes.
+- Selection, analysis and output bounds from P01 remain unchanged.
 
 ## Intentionally not included
 
-- Surface construction or candidate routing.
-- Automatic repair, rebuilding, joining or trimming.
-- Duplicate-geometry comparison.
-- Curvature/fairness scoring.
-- Preview conduit, toolbar, panel or settings.
-- Forum `.3dm` fixtures without confirmed redistribution rights.
+- Surface construction, candidate routing or automatic repair.
+- SubD analysis.
+- Duplicate comparison, curvature scoring, preview, toolbar or panel.
+- Changes to the P01 tolerance and near-gap rules.
 
 ## Acceptance criteria
 
-- CI restore, Release build, unit tests and packaging succeed.
-- `SmartSurfaceVersion` reports `P01`, `0.0.2-p01` and the artifact commit.
-- `SmartSurfacePreflight` accepts top-level curves/Breps and a sub-selected Brep edge.
-- The report contains types, scale, tolerance, item lines, status and a final `SMARTSKIN_P01 PASS` line.
-- Object count is identical before and after successful, blocked-input and cancelled runs.
-- Restarting Rhino does not break either command.
+- CI restore, Release build, Core tests and packaging succeed.
+- `SmartSurfaceVersion` reports `P01F1`, `0.0.3-p01f1` and the artifact commit.
+- Selecting a whole Rhino Box reports `Types: Extrusion=1`, not `Curve=1`.
+- Sub-selecting a Box edge reports `Types: BrepEdge=1`.
+- Item labels identify object versus sub-object scope and the parent Rhino object type.
+- Both completed reports keep `objects=N->N`.
+- Pressing Esc before selection cancels without changing the document.
+- The same checks survive a full Rhino restart.
 
 ## Verification status
 
-- `STATICALLY CHECKED`: source scope, deterministic Core design, bounded output and field-test contract reviewed.
-- `NOT VERIFIED`: compilation, unit tests, packaging and Rhino 8 behavior require GitHub Actions and the P01 field test.
+- `STATICALLY CHECKED`: field evidence diagnosed; correction and regression contract reviewed.
+- `NOT VERIFIED`: GitHub Actions and Rhino 8 behavior require the P01F1 build and field test.

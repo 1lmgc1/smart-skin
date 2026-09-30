@@ -2,11 +2,11 @@
 
 Rhino 8 surface-assistance plug-in. The intended product is a small, dependable command that diagnoses irregular curve/edge frameworks, infers a likely surface strategy, builds candidates and returns a native Rhino result with an explanation.
 
-## Current patch: P01 GeometryReport/Preflight
+## Current patch: P01F1 selection-identity fix
 
 P00 proved the repository → CI → artifact → Rhino field-test loop and is `VERIFIED` in Rhino 8.18.
 
-P01 adds the first read-only geometry command:
+P01 added the first read-only geometry command:
 
 ```text
 SmartSurfacePreflight
@@ -29,6 +29,14 @@ SmartSurfaceVersion
 
 Both commands verify that the document object count is unchanged.
 
+P01F1 fixes a field-test regression in the Rhino adapter: selecting an entire
+`Extrusion` could be reported as the curve returned by `ObjRef.Curve()` instead
+of as the selected document object. The adapter now uses
+`GeometryComponentIndex` to separate sub-object picks from top-level objects.
+Whole extrusions report as `Extrusion`; a sub-selected Brep edge still reports
+as `BrepEdge`. Item labels include the parent object type and whether Rhino
+returned an object or sub-object component. Geometry remains read-only.
+
 ## Projects
 
 - `src/SmartSkin.Core` — Rhino-independent code.
@@ -47,7 +55,7 @@ Requirements for a Windows developer machine:
 dotnet restore SmartSkin.sln
 dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=local
 dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --no-build
-.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.2-p01 -Commit local
+.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.3-p01f1 -Commit local
 ```
 
 GitHub Actions performs the same build on Windows and publishes a versioned ZIP for the Rhino test.
@@ -61,8 +69,9 @@ Follow [`docs/FIELD_TEST.md`](docs/FIELD_TEST.md). A green CI run is not equival
 ## Development sequence
 
 1. P00 — reproducible build/load loop (`VERIFIED`).
-2. P01 — read-only GeometryReport/Preflight (current patch).
-3. Router and candidate adapters only after the input report is verified on cleared fixtures.
+2. P01 — read-only GeometryReport/Preflight.
+3. P01F1 — preserve top-level versus sub-object selection identity (current patch).
+4. Router and candidate adapters only after P01F1 is verified in Rhino.
 
 ## Data and licensing
 
