@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>SmartSkin.Core</RootNamespace>
+    <AssemblyName>SmartSkin.Core</AssemblyName>
+    <Description>Rhino-independent core for Smart Skin.</Description>
+  </PropertyGroup>
+</Project>
+

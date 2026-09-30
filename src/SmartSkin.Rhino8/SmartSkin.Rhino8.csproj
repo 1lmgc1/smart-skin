@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <RootNamespace>SmartSkin.Rhino8</RootNamespace>
+    <AssemblyName>SmartSkin.Rhino8</AssemblyName>
+    <AssemblyTitle>Smart Skin</AssemblyTitle>
+    <Description>Diagnostic bootstrap for the Smart Skin Rhino 8 surface plug-in.</Description>
+    <TargetExt>.rhp</TargetExt>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SmartSkin.Core\SmartSkin.Core.csproj" />
+    <PackageReference Include="RhinoCommon" Version="8.14.24345.15001" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+</Project>
