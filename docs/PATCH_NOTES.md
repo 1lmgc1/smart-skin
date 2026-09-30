@@ -58,5 +58,6 @@ Correct one Rhino-facing classification defect found during the P01 field test w
 
 ## Verification status
 
-- `STATICALLY CHECKED`: field evidence diagnosed; correction and regression contract reviewed.
-- `NOT VERIFIED`: GitHub Actions and Rhino 8 behavior require the P01F1 build and field test.
+- `VERIFIED`: GitHub Actions run 4 restored, built, executed all 11 Core tests and packaged commit `0a53abd245924c5b3789a305b469910e553cd1f7`; all 11 Core tests passed, including the Extrusion regression.
+- `STATICALLY CHECKED`: run 4 exposed a test-harness failure in `Installer lifecycle test`. The temporary nested registry branch is now created one level at a time, and the test always emits a machine-readable failure location plus a downloadable transcript.
+- `NOT VERIFIED`: the corrected Windows installer lifecycle, field-test artifact publication and Rhino 8 behavior require the next GitHub Actions run and P01F1 field test.

@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$PackageRoot
+    [string]$PackageRoot,
+    [string]$LogPath = ""
 )
 
 Set-StrictMode -Version 2.0
@@ -12,20 +13,36 @@ $TestId = [Guid]::NewGuid().ToString("N")
 $TestRoot = Join-Path $env:RUNNER_TEMP ("SmartSkinInstallerTest-" + $TestId)
 $InstallRoot = Join-Path $TestRoot "install"
 $OldDirectory = Join-Path $TestRoot "old-artifact\net48"
-$RegistryBase = "HKCU:\Software\SmartSkinInstallerTests\$TestId\Plug-ins"
-$RegistryTestRoot = "HKCU:\Software\SmartSkinInstallerTests\$TestId"
+$RegistrySuiteRoot = "HKCU:\Software\SmartSkinInstallerTests"
+$RegistryTestRoot = Join-Path $RegistrySuiteRoot $TestId
+$RegistryBase = Join-Path $RegistryTestRoot "Plug-ins"
+$TranscriptStarted = $false
 
 try {
+    if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+        $LogDirectory = Split-Path -Parent $LogPath
+        if (-not [string]::IsNullOrWhiteSpace($LogDirectory)) {
+            New-Item -ItemType Directory -Path $LogDirectory -Force | Out-Null
+        }
+        Start-Transcript -LiteralPath $LogPath -Force | Out-Null
+        $TranscriptStarted = $true
+    }
+
+    Write-Host "SMARTSKIN_INSTALLER_TEST PHASE | setup-fixture"
     New-Item -ItemType Directory -Path $OldDirectory -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $PackageRoot "net48\SmartSkin.Rhino8.rhp") -Destination $OldDirectory
     Copy-Item -LiteralPath (Join-Path $PackageRoot "net48\SmartSkin.Core.dll") -Destination $OldDirectory
     Set-Content -LiteralPath (Join-Path $OldDirectory "keep-user-file.txt") -Value "must survive" -Encoding ASCII
 
+    New-Item -Path $RegistrySuiteRoot -Force | Out-Null
+    New-Item -Path $RegistryTestRoot -Force | Out-Null
+    New-Item -Path $RegistryBase -Force | Out-Null
     $OldRegistryKey = Join-Path $RegistryBase ("{" + $PluginGuid.ToUpperInvariant() + "}")
     New-Item -Path $OldRegistryKey -Force | Out-Null
     New-ItemProperty -Path $OldRegistryKey -Name "Name" -PropertyType String -Value "Smart Skin" -Force | Out-Null
     New-ItemProperty -Path $OldRegistryKey -Name "FileName" -PropertyType String -Value (Join-Path $OldDirectory "SmartSkin.Rhino8.rhp") -Force | Out-Null
 
+    Write-Host "SMARTSKIN_INSTALLER_TEST PHASE | migrate-manual-install"
     & (Join-Path $PackageRoot "Install-SmartSkin.ps1") `
         -PackageRoot $PackageRoot `
         -InstallRoot $InstallRoot `
@@ -56,6 +73,7 @@ try {
         throw "Registry does not point to the managed RHP."
     }
 
+    Write-Host "SMARTSKIN_INSTALLER_TEST PHASE | repeat-update"
     & (Join-Path $PackageRoot "Install-SmartSkin.ps1") `
         -PackageRoot $PackageRoot `
         -InstallRoot $InstallRoot `
@@ -71,6 +89,7 @@ try {
         throw "Installer left an old managed version behind."
     }
 
+    Write-Host "SMARTSKIN_INSTALLER_TEST PHASE | uninstall"
     & (Join-Path $PackageRoot "Uninstall-SmartSkin.ps1") `
         -InstallRoot $InstallRoot `
         -RegistryBase $RegistryBase `
@@ -88,11 +107,27 @@ try {
 
     Write-Host "SMARTSKIN_INSTALLER_TEST PASS"
 }
+catch {
+    $Invocation = $_.InvocationInfo
+    $FailureLocation = "unknown"
+    if ($null -ne $Invocation) {
+        $FailureLocation = "$($Invocation.ScriptName):$($Invocation.ScriptLineNumber)"
+    }
+    Write-Host "SMARTSKIN_INSTALLER_TEST FAIL | location=$FailureLocation | error=$($_.Exception.Message)"
+    throw
+}
 finally {
     if (Test-Path -LiteralPath $RegistryTestRoot) {
-        Remove-Item -LiteralPath $RegistryTestRoot -Recurse -Force
+        Remove-Item -LiteralPath $RegistryTestRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ((Test-Path -LiteralPath $RegistrySuiteRoot) -and
+        @(Get-ChildItem -LiteralPath $RegistrySuiteRoot -ErrorAction SilentlyContinue).Count -eq 0) {
+        Remove-Item -LiteralPath $RegistrySuiteRoot -Force -ErrorAction SilentlyContinue
     }
     if (Test-Path -LiteralPath $TestRoot) {
-        Remove-Item -LiteralPath $TestRoot -Recurse -Force
+        Remove-Item -LiteralPath $TestRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ($TranscriptStarted) {
+        Stop-Transcript -ErrorAction SilentlyContinue | Out-Null
     }
 }
