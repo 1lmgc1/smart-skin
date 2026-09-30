@@ -2,15 +2,32 @@
 
 Rhino 8 surface-assistance plug-in. The intended product is a small, dependable command that diagnoses irregular curve/edge frameworks, infers a likely surface strategy, builds candidates and returns a native Rhino result with an explanation.
 
-## Current patch: P00 Bootstrap
+## Current patch: P01 GeometryReport/Preflight
 
-P00 contains no surface solver. It proves the repository → CI → artifact → Rhino field-test loop with the diagnostic command:
+P00 proved the repository → CI → artifact → Rhino field-test loop and is `VERIFIED` in Rhino 8.18.
+
+P01 adds the first read-only geometry command:
+
+```text
+SmartSurfacePreflight
+```
+
+Select curves, Brep edges, points, surfaces or polysurfaces. The command reports:
+
+- selection types, validity and bounding-box scale;
+- curve length, closure, planarity, degree and span count;
+- near endpoint gaps above document tolerance;
+- Brep face/edge counts, naked edges and edges not longer than tolerance;
+- document tolerance relative to the selected geometry scale;
+- bounded issue codes and a machine-readable PASS line.
+
+P01 never creates or repairs geometry. The existing diagnostic command remains available:
 
 ```text
 SmartSurfaceVersion
 ```
 
-The command prints the patch, version, commit, Rhino/runtime information and a machine-readable PASS line. It verifies that the document object count is unchanged.
+Both commands verify that the document object count is unchanged.
 
 ## Projects
 
@@ -30,7 +47,7 @@ Requirements for a Windows developer machine:
 dotnet restore SmartSkin.sln
 dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=local
 dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --no-build
-.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.1-p00 -Commit local
+.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.2-p01 -Commit local
 ```
 
 GitHub Actions performs the same build on Windows and publishes a versioned ZIP for the Rhino test.
@@ -43,8 +60,8 @@ Follow [`docs/FIELD_TEST.md`](docs/FIELD_TEST.md). A green CI run is not equival
 
 ## Development sequence
 
-1. P00 — reproducible build/load loop.
-2. P01 — read-only GeometryReport/Preflight.
+1. P00 — reproducible build/load loop (`VERIFIED`).
+2. P01 — read-only GeometryReport/Preflight (current patch).
 3. Router and candidate adapters only after the input report is verified on cleared fixtures.
 
 ## Data and licensing

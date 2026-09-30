@@ -13,7 +13,7 @@ public sealed class BuildIdentityTests
 
         Assert.False(string.IsNullOrWhiteSpace(identity.Version));
         Assert.False(string.IsNullOrWhiteSpace(identity.Commit));
-        Assert.Equal("P00", identity.Patch);
+        Assert.Equal("P01", identity.Patch);
     }
 
     [Fact]
@@ -23,7 +23,7 @@ public sealed class BuildIdentityTests
 
         var line = identity.ToMachineLine(17);
 
-        Assert.StartsWith("SMARTSKIN_P00 PASS", line);
+        Assert.StartsWith("SMARTSKIN_P01 PASS", line);
         Assert.Contains("version=", line);
         Assert.Contains("commit=", line);
         Assert.EndsWith("objects=17", line);

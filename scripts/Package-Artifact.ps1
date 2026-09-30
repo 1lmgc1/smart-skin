@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "0.0.1-p00",
+    [string]$Version = "0.0.2-p01",
     [string]$Commit = "local",
     [string]$OutputRoot = ""
 )
@@ -69,7 +69,7 @@ Copy-Item (Join-Path $RepoRoot "docs\PATCH_NOTES.md") $Stage
 @(
     "package=$PackageName"
     "version=$Version"
-    "patch=P00"
+    "patch=P01"
     "commit=$Commit"
     "configuration=$Configuration"
     "created_utc=$([DateTime]::UtcNow.ToString('o'))"
