@@ -2,7 +2,7 @@
 
 Rhino 8 surface-assistance plug-in. The intended product is a small, dependable command that diagnoses irregular curve/edge frameworks, infers a likely surface strategy, builds candidates and returns a native Rhino result with an explanation.
 
-## Current state: P01F1 verified
+## Current patch: P02 topology classifier and strategy router
 
 P00 proved the repository → CI → artifact → Rhino field-test loop and is `VERIFIED` in Rhino 8.18.
 
@@ -27,7 +27,7 @@ P01 never creates or repairs geometry. The existing diagnostic command remains a
 SmartSurfaceVersion
 ```
 
-Both commands verify that the document object count is unchanged.
+The diagnostic and preflight commands verify that the document object count is unchanged.
 
 P01F1 fixed a field-test regression in the Rhino adapter: selecting an entire
 `Extrusion` could be reported as the curve returned by `ObjRef.Curve()` instead
@@ -39,6 +39,24 @@ returned an object or sub-object component. Geometry remains read-only. The
 correction, managed installer lifecycle, cancellation path and restart behavior
 are `VERIFIED` in Rhino 8.18 for field build commit
 `550b74ff9f5bd8953d80c28560a9951d39214d55`.
+
+P02 adds a second read-only command:
+
+```text
+SmartSurfacePlan
+```
+
+It runs the verified snapshot/preflight path, clusters open-curve endpoints at
+document tolerance, classifies the selected frame and ranks native Rhino
+strategies. Current classifications cover a single closed boundary, a closed
+loop of segments, disconnected sections, an open chain, branched or mixed
+frames, point-guided inputs and surface-only context. Candidate strategies are
+`PlanarSrf`, `EdgeSrf`, `Loft`, `Patch` and `NetworkSrf`.
+
+P02 deliberately stops at an explained plan. It does not create preview or
+document geometry, does not repair gaps, and does not claim internal
+intersection families or G0/G1/G2 continuity that it has not measured.
+`SmartSurfacePlan` also verifies the document object count before returning.
 
 ## Projects
 
@@ -58,7 +76,7 @@ Requirements for a Windows developer machine:
 dotnet restore SmartSkin.sln
 dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=local
 dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --no-build
-.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.3-p01f1 -Commit local
+.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.4-p02 -Commit local
 ```
 
 GitHub Actions performs the same build on Windows and publishes a versioned ZIP for the Rhino test.
@@ -76,7 +94,8 @@ Extract the artifact, close Rhino and run `INSTALL.cmd`, then follow [`docs/FIEL
 1. P00 — reproducible build/load loop (`VERIFIED`).
 2. P01 — read-only GeometryReport/Preflight.
 3. P01F1 — preserve top-level versus sub-object selection identity (`VERIFIED`).
-4. P02 — input topology classification and candidate routing without geometry mutation (next; not started).
+4. P02 — input topology classification and candidate routing without geometry mutation (current patch).
+5. P03 — construct disposable candidates only after P02 is verified in Rhino.
 
 ## Data and licensing
 

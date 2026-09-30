@@ -4,7 +4,7 @@
     <RootNamespace>SmartSkin.Rhino8</RootNamespace>
     <AssemblyName>SmartSkin.Rhino8</AssemblyName>
     <AssemblyTitle>Smart Skin</AssemblyTitle>
-    <Description>Read-only geometry preflight for the Smart Skin Rhino 8 surface plug-in.</Description>
+    <Description>Read-only geometry preflight and surface-strategy routing for the Smart Skin Rhino 8 plug-in.</Description>
     <TargetExt>.rhp</TargetExt>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>

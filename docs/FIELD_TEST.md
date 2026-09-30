@@ -1,75 +1,99 @@
-# P01F1 Rhino 8 field test
+# P02 Rhino 8 field test
 
-Use the ZIP produced by the successful `build-p01f1` GitHub Actions run. Do not mix it with P01 files.
+Use the ZIP produced by the successful `build-p02` GitHub Actions run. Do not
+mix it with a P01F1 artifact.
 
 ## Install
 
 1. Close every Rhino window and confirm `Rhino.exe` is no longer running.
-2. Extract the P01F1 artifact to a new folder.
+2. Extract the P02 artifact to a new folder.
 3. Double-click `INSTALL.cmd` and wait for `SMARTSKIN_INSTALL PASS`.
-4. The installer copies the new build to `%LOCALAPPDATA%\SmartSkin\Rhino8\current`, registers that stable path for Rhino 8, and removes the previously registered Smart Skin binaries. It never recursively deletes an external download/source folder or unrelated files beside an old build.
-5. Do not start Rhino yet. Record the complete `SMARTSKIN_INSTALL PASS` line. Its `path` must end in `\AppData\Local\SmartSkin\Rhino8\current\SmartSkin.Rhino8.rhp`. When migrating a still-present manual installation, `removed_old_files` must be greater than zero; a zero result requires a separate registry/path check before Rhino starts.
-6. Start Rhino 8 normally only after the installation line has been accepted. Do not use `Tools → Options → Plug-ins → Install…` for this or later Smart Skin artifacts.
+4. Confirm `version=0.0.4-p02` and a path ending in
+   `\AppData\Local\SmartSkin\Rhino8\current\SmartSkin.Rhino8.rhp`.
+5. This is an update of the managed P01F1 installation, so
+   `removed_old_files=0` is expected: the managed `current` directory is
+   replaced transactionally rather than treated as an external legacy folder.
+6. Start Rhino normally. Do not use `Tools → Options → Plug-ins → Install…`.
 
-If the installer reports that Rhino is open, close all Rhino windows and run `INSTALL.cmd` again. A failed install must be returned as the complete `SMARTSKIN_INSTALL FAIL` line.
-
-## Uninstall
-
-Close Rhino and run `UNINSTALL.cmd`. A successful uninstall returns `SMARTSKIN_UNINSTALL PASS`, removes the Smart Skin registry entry and deletes the managed `%LOCALAPPDATA%\SmartSkin\Rhino8` folder.
+If installation fails, return the complete `SMARTSKIN_INSTALL FAIL` line and do
+not start Rhino.
 
 ## Test A — build identity
 
 1. Run `SmartSurfaceVersion`.
-2. Confirm `Patch: P01F1`, `Version: 0.0.3-p01f1` and the artifact commit.
-3. Keep the final `SMARTSKIN_P01F1 PASS` line.
+2. Confirm `Patch: P02`, `Version: 0.0.4-p02` and the artifact commit.
+3. Keep the final `SMARTSKIN_P02 PASS` line.
 
-## Test B — parent object versus sub-object
+## Test B — one planar closed boundary
 
-1. Start a blank millimetre document and create one ordinary `Box`.
-2. Turn the Rhino Selection Filter `Sub-objects` option off.
-3. Run `SmartSurfacePreflight`, select the whole Box normally, and press Enter.
-4. Confirm `Types: Extrusion=1`; `Curve=1` is a failure.
-5. Confirm the item label contains `object:Extrusion` and the final line ends with `objects=1->1`.
-6. Run `SmartSurfacePreflight` again.
-7. Ctrl+Shift-click one Box edge and press Enter.
-8. Confirm `Types: BrepEdge=1`, a `subobject:` label and `objects=1->1`.
+1. In a blank millimetre document create one ordinary `Circle`.
+2. Run `SmartSurfacePlan`, select the circle and press Enter.
+3. Confirm:
+   - `Routing status: READY`
+   - `Topology: SINGLE_CLOSED_BOUNDARY`
+   - candidate `1. PlanarSrf`
+   - machine fields `primary=PLANAR_SRF`, `selected=1`, `objects=1->1`.
 
-## Test C — cancellation
+## Test C — four-segment boundary loop
 
-1. Run `SmartSurfacePreflight`.
-2. Press Esc before selecting anything.
-3. Run `SmartSurfaceVersion` and confirm the object count is still 1.
+1. Start another blank millimetre document.
+2. Create one `Rectangle`, then run `Explode` so it becomes four line curves.
+3. Run `SmartSurfacePlan`, select all four lines and press Enter.
+4. Confirm:
+   - `Topology: CLOSED_BOUNDARY_LOOP`
+   - endpoint graph `nodes=4`, `components=1`, `ends=0`, `through=4`
+   - candidate `1. EdgeSrf`
+   - machine fields `primary=EDGE_SRF`, `selected=4`, `objects=4->4`.
 
-## Test D — restart
+## Test D — section set
 
-1. Close Rhino completely and reopen the same Box file.
-2. Run `SmartSurfaceVersion` and one whole-Box `SmartSurfacePreflight`.
-3. Confirm `P01F1`, `Extrusion=1` and unchanged object count.
+1. Start another blank millimetre document.
+2. Create one circle, copy it vertically by 10 mm and keep both circles.
+3. Run `SmartSurfacePlan`, select both circles and press Enter.
+4. Confirm:
+   - `Topology: SECTION_SET`
+   - candidate `1. Loft`
+   - machine fields `primary=LOFT`, `selected=2`, `objects=2->2`.
+5. Save this two-circle document.
+
+## Test E — open-chain diagnosis and cancellation
+
+1. Start another blank millimetre document.
+2. Create and explode a rectangle, then delete one of its four sides.
+3. Run `SmartSurfacePlan`, select the remaining three connected lines and press Enter.
+4. Confirm:
+   - `Routing status: BLOCKED`
+   - `Topology: OPEN_CHAIN`
+   - `Candidates: none`
+   - machine fields `primary=NONE`, `selected=3`, `objects=3->3`.
+5. Run `SmartSurfacePlan` again and press Esc before selecting anything.
+6. Run `SmartSurfaceVersion` and confirm `objects=3`.
+
+## Test F — restart
+
+1. Close Rhino completely and reopen the saved two-circle document from Test D.
+2. Run `SmartSurfaceVersion` and `SmartSurfacePlan` on both circles.
+3. Confirm `P02`, `SECTION_SET`, `primary=LOFT` and `objects=2->2`.
 
 ## Pass criteria
 
 - Build identity matches the artifact.
-- Whole Extrusion and sub-selected Brep edge retain distinct types.
+- The four required topology/route pairs match exactly.
+- Endpoint graph evidence matches the exploded rectangle.
 - No completed or cancelled command changes document geometry.
-- Classification remains correct after a full Rhino restart.
-
-## Recorded reference result
-
-P01F1 is `VERIFIED` in Rhino 8.18 for field build commit
-`550b74ff9f5bd8953d80c28560a9951d39214d55`. The completed test covered the
-managed installation, build identity, whole saved Extrusion, sub-selected Brep
-edge, cancellation without an object-count change, and a full Rhino restart.
+- The managed update and section route survive a full Rhino restart.
 
 ## Return this evidence
 
 ```text
+install_machine_line:
 version_machine_line:
-whole_box_types_line:
-whole_box_machine_line:
-brep_edge_types_line:
-brep_edge_machine_line:
+single_boundary_machine_line:
+closed_loop_graph_line:
+closed_loop_machine_line:
+section_set_machine_line:
+open_chain_machine_line:
 after_cancel_version_machine_line:
-after_restart_types_line:
 after_restart_machine_line:
 result: PASS / FAIL
 complete_error_if_any:

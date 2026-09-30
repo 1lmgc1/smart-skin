@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 
 $PluginGuid = "b3f42f21-1f15-45e6-9bc2-a68b0b27c877"
 $PluginName = "Smart Skin"
-$Version = "0.0.3-p01f1"
+$Version = "0.0.4-p02"
 $KnownPluginFiles = @(
     "SmartSkin.Rhino8.rhp",
     "SmartSkin.Rhino8.pdb",
