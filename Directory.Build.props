@@ -1,0 +1,27 @@
+<Project>
+  <PropertyGroup>
+    <Authors>1lmgc1</Authors>
+    <Company>Smart Skin Project</Company>
+    <Product>Smart Skin</Product>
+    <Copyright>Copyright © 2026 Smart Skin Project</Copyright>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/1lmgc1/smart-skin</RepositoryUrl>
+    <VersionPrefix>0.0.1</VersionPrefix>
+    <VersionSuffix>p00</VersionSuffix>
+    <SourceRevisionId Condition="'$(SourceRevisionId)' == ''">local</SourceRevisionId>
+    <InformationalVersion>$(VersionPrefix)-$(VersionSuffix)+$(SourceRevisionId)</InformationalVersion>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="GitCommit" Value="$(SourceRevisionId)" />
+    <AssemblyMetadata Include="Patch" Value="P00" />
+  </ItemGroup>
+</Project>
+

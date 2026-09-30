@@ -1,0 +1,31 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmartSkin.Core", "src\SmartSkin.Core\SmartSkin.Core.csproj", "{D5A5F42B-8D89-4B60-97A9-FA34AE1B02A1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmartSkin.Rhino8", "src\SmartSkin.Rhino8\SmartSkin.Rhino8.csproj", "{FCA55A50-D2A1-4559-BEF6-A44E21399B32}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmartSkin.Core.Tests", "tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj", "{8E6D0E84-58D8-4D98-B80D-11B880E4758B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D5A5F42B-8D89-4B60-97A9-FA34AE1B02A1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D5A5F42B-8D89-4B60-97A9-FA34AE1B02A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D5A5F42B-8D89-4B60-97A9-FA34AE1B02A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D5A5F42B-8D89-4B60-97A9-FA34AE1B02A1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FCA55A50-D2A1-4559-BEF6-A44E21399B32}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FCA55A50-D2A1-4559-BEF6-A44E21399B32}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FCA55A50-D2A1-4559-BEF6-A44E21399B32}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FCA55A50-D2A1-4559-BEF6-A44E21399B32}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8E6D0E84-58D8-4D98-B80D-11B880E4758B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8E6D0E84-58D8-4D98-B80D-11B880E4758B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8E6D0E84-58D8-4D98-B80D-11B880E4758B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8E6D0E84-58D8-4D98-B80D-11B880E4758B}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
+
