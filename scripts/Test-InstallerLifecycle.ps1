@@ -72,6 +72,9 @@ try {
         [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Registry does not point to the managed RHP."
     }
+    if (Test-Path -LiteralPath $OldRegistryKey) {
+        throw "Installer left the old braced registry key behind."
+    }
 
     Write-Host "SMARTSKIN_INSTALLER_TEST PHASE | repeat-update"
     & (Join-Path $PackageRoot "Install-SmartSkin.ps1") `

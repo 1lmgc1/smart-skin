@@ -2,7 +2,7 @@
 
 ## Current state
 
-P00 is `VERIFIED` in Rhino 8.18. P01 passed CI plus curve, near-gap and Brep-edge field checks, but the field test exposed a top-level selection-classification defect: a whole Extrusion could be reported as a Curve. P01F1 contains the read-only adapter correction plus a managed install/update/uninstall lifecycle that removes the previous registered Smart Skin binaries. GitHub Actions run 4 built and passed all 11 Core tests, then failed only in the new lifecycle test harness; the registry-fixture setup and diagnostic capture are corrected for the next run. Rhino verification is pending.
+P00 is `VERIFIED` in Rhino 8.18. P01 passed CI plus curve, near-gap and Brep-edge field checks, but the field test exposed a top-level selection-classification defect: a whole Extrusion could be reported as a Curve. P01F1 contains the read-only adapter correction plus a managed install/update/uninstall lifecycle that removes the previous registered Smart Skin binaries. GitHub Actions runs 4 and 5 built, packaged and passed all 11 Core tests. Run 5 then located an installer idempotency defect: duplicate-registry cleanup attempted to remove a captured legacy key that was already absent. The cleanup now tolerates that valid state and the lifecycle test asserts that the old braced key is gone. Windows lifecycle and Rhino verification are pending.
 
 ## Source of truth
 

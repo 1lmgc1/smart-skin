@@ -222,7 +222,8 @@ try {
     }
 
     foreach ($Key in $RegistryKeys) {
-        if ($Key.PSChildName -ne $PluginGuid) {
+        if ($Key.PSChildName -ne $PluginGuid -and
+            (Test-Path -LiteralPath $Key.PSPath)) {
             Remove-Item -LiteralPath $Key.PSPath -Recurse -Force
         }
     }

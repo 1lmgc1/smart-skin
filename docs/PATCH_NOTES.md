@@ -58,6 +58,6 @@ Correct one Rhino-facing classification defect found during the P01 field test w
 
 ## Verification status
 
-- `VERIFIED`: GitHub Actions run 4 restored, built, executed all 11 Core tests and packaged commit `0a53abd245924c5b3789a305b469910e553cd1f7`; all 11 Core tests passed, including the Extrusion regression.
-- `STATICALLY CHECKED`: run 4 exposed a test-harness failure in `Installer lifecycle test`. The temporary nested registry branch is now created one level at a time, and the test always emits a machine-readable failure location plus a downloadable transcript.
+- `VERIFIED`: GitHub Actions runs 4 and 5 restored, built, executed all 11 Core tests and packaged P01F1; all 11 Core tests passed, including the Extrusion regression.
+- `STATICALLY CHECKED`: run 5 reached the real installer and identified an idempotency defect at duplicate-registry cleanup. A braced legacy key may already be absent when cleanup executes. Cleanup now tests the captured key path before removal, while the lifecycle test explicitly requires the legacy braced key to be gone after migration.
 - `NOT VERIFIED`: the corrected Windows installer lifecycle, field-test artifact publication and Rhino 8 behavior require the next GitHub Actions run and P01F1 field test.
