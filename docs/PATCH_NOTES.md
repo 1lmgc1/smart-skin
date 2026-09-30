@@ -25,6 +25,8 @@ Correct one Rhino-facing classification defect found during the P01 field test w
 - Include `object:<type>` or `subobject:<component>@<parent-type>` in each selection label so Selection Filter behavior is explicit.
 - Add a Core regression test proving that an Extrusion remains typed as `Extrusion` in the report.
 - Update build identity, CI artifact names and the targeted Rhino field test.
+- Add a per-user `INSTALL.cmd`/`UNINSTALL.cmd` lifecycle. Updates use the stable `%LOCALAPPDATA%\SmartSkin\Rhino8\current` path, replace the registered build and remove known binaries from the previously registered Smart Skin location.
+- Add a Windows CI lifecycle test covering migration from a manually registered artifact, preservation of unrelated files, repeat update cleanup, registry replacement and uninstall.
 
 ## Invariants
 
@@ -33,6 +35,7 @@ Correct one Rhino-facing classification defect found during the P01 field test w
 - A sub-selected Brep edge must remain `BrepEdge`.
 - Cancellation returns control to Rhino without geometry changes.
 - Selection, analysis and output bounds from P01 remain unchanged.
+- Installer cleanup is limited to the exact Smart Skin registry GUID, its managed install root, and the five known Smart Skin binary/debug filenames beside a previously registered `SmartSkin.Rhino8.rhp`.
 
 ## Intentionally not included
 
@@ -44,6 +47,7 @@ Correct one Rhino-facing classification defect found during the P01 field test w
 ## Acceptance criteria
 
 - CI restore, Release build, Core tests and packaging succeed.
+- The installer lifecycle CI test succeeds and leaves no previous managed version or stale Smart Skin registration.
 - `SmartSurfaceVersion` reports `P01F1`, `0.0.3-p01f1` and the artifact commit.
 - Selecting a whole Rhino Box reports `Types: Extrusion=1`, not `Curve=1`.
 - Sub-selecting a Box edge reports `Types: BrepEdge=1`.

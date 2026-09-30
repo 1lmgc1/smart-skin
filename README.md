@@ -60,11 +60,13 @@ dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --
 
 GitHub Actions performs the same build on Windows and publishes a versioned ZIP for the Rhino test.
 
+The ZIP contains `INSTALL.cmd` and `UNINSTALL.cmd`. `INSTALL.cmd` keeps one managed copy at `%LOCALAPPDATA%\SmartSkin\Rhino8\current`, updates the Rhino 8 per-user registry entry for the fixed Smart Skin plug-in GUID, and removes the known binaries from the previously registered Smart Skin location. Rhino must be closed during either operation.
+
 Repository upload instructions: [`docs/UPLOAD.md`](docs/UPLOAD.md).
 
 ## Test in Rhino
 
-Follow [`docs/FIELD_TEST.md`](docs/FIELD_TEST.md). A green CI run is not equivalent to a Rhino field test.
+Extract the artifact, close Rhino and run `INSTALL.cmd`, then follow [`docs/FIELD_TEST.md`](docs/FIELD_TEST.md). Do not manually register the `.rhp` from the extracted download folder. A green CI run is not equivalent to a Rhino field test.
 
 ## Development sequence
 

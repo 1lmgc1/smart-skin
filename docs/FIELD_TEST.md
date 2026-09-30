@@ -6,9 +6,15 @@ Use the ZIP produced by the successful `build-p01f1` GitHub Actions run. Do not 
 
 1. Close every Rhino window and confirm `Rhino.exe` is no longer running.
 2. Extract the P01F1 artifact to a new folder.
-3. Start Rhino 8 normally, not in Safe Mode.
-4. Open `Tools → Options → Plug-ins`, click `Install…`, and select `net48\SmartSkin.Rhino8.rhp` from the new folder.
-5. Keep `SmartSkin.Rhino8.rhp` and `SmartSkin.Core.dll` together.
+3. Double-click `INSTALL.cmd` and wait for `SMARTSKIN_INSTALL PASS`.
+4. The installer copies the new build to `%LOCALAPPDATA%\SmartSkin\Rhino8\current`, registers that stable path for Rhino 8, and removes the previously registered Smart Skin binaries. It never recursively deletes an external download/source folder or unrelated files beside an old build.
+5. Start Rhino 8 normally, not in Safe Mode. Do not use `Tools → Options → Plug-ins → Install…` for this or later Smart Skin artifacts.
+
+If the installer reports that Rhino is open, close all Rhino windows and run `INSTALL.cmd` again. A failed install must be returned as the complete `SMARTSKIN_INSTALL FAIL` line.
+
+## Uninstall
+
+Close Rhino and run `UNINSTALL.cmd`. A successful uninstall returns `SMARTSKIN_UNINSTALL PASS`, removes the Smart Skin registry entry and deletes the managed `%LOCALAPPDATA%\SmartSkin\Rhino8` folder.
 
 ## Test A — build identity
 

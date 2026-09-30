@@ -37,6 +37,10 @@ jobs:
         shell: pwsh
         run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.3-p01f1" -Commit "${{ github.sha }}"
 
+      - name: Installer lifecycle test
+        shell: pwsh
+        run: ./scripts/Test-InstallerLifecycle.ps1 -PackageRoot "${{ steps.package.outputs.package_root }}"
+
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4

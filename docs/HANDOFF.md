@@ -2,7 +2,7 @@
 
 ## Current state
 
-P00 is `VERIFIED` in Rhino 8.18. P01 passed CI plus curve, near-gap and Brep-edge field checks, but the field test exposed a top-level selection-classification defect: a whole Extrusion could be reported as a Curve. P01F1 contains the read-only adapter correction; CI and Rhino verification are pending.
+P00 is `VERIFIED` in Rhino 8.18. P01 passed CI plus curve, near-gap and Brep-edge field checks, but the field test exposed a top-level selection-classification defect: a whole Extrusion could be reported as a Curve. P01F1 contains the read-only adapter correction plus a managed install/update/uninstall lifecycle that removes the previous registered Smart Skin binaries; CI and Rhino verification are pending.
 
 ## Source of truth
 
@@ -16,6 +16,7 @@ The repository is authoritative for code, workflows, commits and build artifacts
 2. Inspect the latest GitHub Actions run and its exact commit SHA.
 3. Do not begin surface construction until P01F1 has a Rhino field-test result.
 4. Preserve the patch discipline: one architectural goal, targeted checks, field test, then the next patch.
+5. Install field-test artifacts only through `INSTALL.cmd`; manual `.rhp` registration is superseded.
 
 ## Current patch
 
