@@ -33,7 +33,7 @@ public sealed class BuildIdentity
         var fallbackVersion = assembly.GetName().Version?.ToString() ?? "unknown";
         var version = string.IsNullOrWhiteSpace(informationalVersion)
             ? fallbackVersion
-            : informationalVersion.Split('+')[0];
+            : informationalVersion!.Split('+')[0];
 
         var metadata = assembly.GetCustomAttributes<AssemblyMetadataAttribute>().ToArray();
         var commit = MetadataValue(metadata, "GitCommit") ?? CommitFromInformationalVersion(informationalVersion) ?? "unknown";
@@ -59,10 +59,10 @@ public sealed class BuildIdentity
             return null;
         }
 
-        var separator = informationalVersion.IndexOf('+');
-        return separator >= 0 && separator < informationalVersion.Length - 1
-            ? informationalVersion.Substring(separator + 1)
+        var nonEmptyInformationalVersion = informationalVersion!;
+        var separator = nonEmptyInformationalVersion.IndexOf('+');
+        return separator >= 0 && separator < nonEmptyInformationalVersion.Length - 1
+            ? nonEmptyInformationalVersion.Substring(separator + 1)
             : null;
     }
 }
-
