@@ -2,7 +2,7 @@
 
 Rhino 8 surface-assistance plug-in. The intended product is a small, dependable command that diagnoses irregular curve/edge frameworks, infers a likely surface strategy, builds candidates and returns a native Rhino result with an explanation.
 
-## Current state: P04 accepted; P04F1 four-command toolbar
+## Current state: P05 contextual tangent Patch
 
 P00 proved the repository → CI → artifact → Rhino field-test loop and is `VERIFIED` in Rhino 8.18.
 
@@ -76,9 +76,9 @@ bounded routes: one planar closed curve for `PlanarSrf`, two to four open
 curves forming a closed loop for `EdgeSrf`, or exactly two matching open/open
 or closed/closed sections for `Loft`. Construction is capped at four curves
 and 64 combined spans. A single Brep candidate is built from curve copies and
-shown through a temporary viewport conduit. The document changes only when the
-user explicitly chooses `Accept`; `Cancel`, Esc, a blocked route, or a native
-construction failure leaves `objects=N->N`. Accept adds exactly one native
+shown through a temporary viewport conduit. The document changes only after
+explicit preview confirmation; Esc, a blocked route, or a native
+construction failure leaves `objects=N->N`. Confirmation adds exactly one native
 Brep while preserving every source object.
 
 P03 does not run `Patch` or `NetworkSrf`, sort more than two Loft sections,
@@ -109,6 +109,16 @@ commands as distinct buttons: Build, Plan, Preflight and Version. It adds no
 runtime command or solver and changes no production C# source. See
 [`docs/P04F1_TOOLBAR.md`](docs/P04F1_TOOLBAR.md).
 
+P05 version `0.0.10-p05` adds the first context-aware soft hole-fill route.
+When five to eight selected Brep edges form one strict closed loop, routing
+keeps their owning trims instead of reducing them to detached curves.
+Construction requires every edge to be naked with one adjacent face, then asks
+Rhino for one trimmed tangent Patch using the trim normals. Ordinary curve
+loops, manifold edges and ambiguous trim ownership remain blocked or under
+review. The log says `G1_REQUESTED`; measured continuity and candidate ranking
+remain future work. Preview confirmation now uses Enter, Space or right-click;
+Esc cancels. See [`docs/PATCH_NOTES.md`](docs/PATCH_NOTES.md).
+
 ## Projects
 
 - `src/SmartSkin.Core` — Rhino-independent code.
@@ -127,7 +137,7 @@ Requirements for a Windows developer machine:
 dotnet restore SmartSkin.sln
 dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=local
 dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --no-build
-.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.9-p04f1 -Commit local
+.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.10-p05 -Commit local
 ```
 
 GitHub Actions performs the same build on Windows and publishes a versioned ZIP for the Rhino test.
@@ -154,6 +164,7 @@ equivalent to the focused four-button Rhino check.
 6. P03F1 — exclude deleted Undo records from all document-count diagnostics (`VERIFIED` on commit `ada5c269c9d270e44952fcc297b611236c4a4782`).
 7. P04 — native one-button Build toolbar, version `0.0.8-p04` (`VERIFIED` on commit `a9e854dec93cde1a0e74d2596081d863803993ae`).
 8. P04F1 — expand the accepted toolbar to all four existing commands, version `0.0.9-p04f1`.
+9. P05 — contextual tangent Patch for one five-to-eight-edge Brep boundary, version `0.0.10-p05`.
 
 ## Data and licensing
 

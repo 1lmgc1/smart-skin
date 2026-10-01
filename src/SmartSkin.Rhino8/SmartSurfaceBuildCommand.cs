@@ -121,6 +121,7 @@ public sealed class SmartSurfaceBuildCommand : Command
                 + $"; code={outcome.Code}"
                 + $"; reversed={outcome.ReversedCurveCount.ToString(CultureInfo.InvariantCulture)}"
                 + $"; elapsed_ms={outcome.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)}"
+                + BoundaryBuildDetails(construction, outcome, separator: ";")
                 + $"; {outcome.Message}");
 
             var candidate = outcome.Candidate;
@@ -134,6 +135,7 @@ public sealed class SmartSurfaceBuildCommand : Command
                     objectCountBefore,
                     RhinoDocumentMetrics.ActiveObjectCount(doc),
                     $" | stage=BUILD"
+                    + BoundaryBuildDetails(construction, outcome, separator: " |")
                     + $" | elapsed_ms={outcome.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)}");
                 return Result.Success;
             }
@@ -157,6 +159,7 @@ public sealed class SmartSurfaceBuildCommand : Command
                     RhinoDocumentMetrics.ActiveObjectCount(doc),
                     $" | built=1"
                     + $" | added=0"
+                    + BoundaryBuildDetails(construction, outcome, separator: " |")
                     + $" | reversed={outcome.ReversedCurveCount.ToString(CultureInfo.InvariantCulture)}"
                     + $" | elapsed_ms={outcome.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)}");
                 return previewResult.CommandResult;
@@ -193,6 +196,7 @@ public sealed class SmartSurfaceBuildCommand : Command
                 + " | code=P03_ACCEPTED"
                 + " | built=1"
                 + " | added=1"
+                + BoundaryBuildDetails(construction, outcome, separator: " |")
                 + $" | reversed={outcome.ReversedCurveCount.ToString(CultureInfo.InvariantCulture)}"
                 + $" | elapsed_ms={outcome.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)}"
                 + $" | objects={objectCountBefore.ToString(CultureInfo.InvariantCulture)}->{objectCountAfter.ToString(CultureInfo.InvariantCulture)}");
@@ -221,23 +225,13 @@ public sealed class SmartSurfaceBuildCommand : Command
         try
         {
             using var decision = new GetOption();
-            decision.SetCommandPrompt("Preview candidate: choose Accept to add it, or Cancel/Esc to keep the document unchanged");
-            var acceptIndex = decision.AddOption("Accept");
-            var cancelIndex = decision.AddOption("Cancel");
+            decision.SetCommandPrompt("Preview candidate. Press Enter, Space, or right-click to add; press Esc to cancel");
+            decision.AcceptNothing(true);
             var getResult = decision.Get();
 
-            if (getResult == GetResult.Option)
+            if (getResult == GetResult.Nothing)
             {
-                var selectedIndex = decision.Option().Index;
-                if (selectedIndex == acceptIndex)
-                {
-                    return new PreviewDecision(true, Result.Success, "P03_ACCEPTED");
-                }
-
-                if (selectedIndex == cancelIndex)
-                {
-                    return new PreviewDecision(false, Result.Cancel, "P03_PREVIEW_CANCELLED");
-                }
+                return new PreviewDecision(true, Result.Success, "P03_ACCEPTED");
             }
 
             var commandResult = decision.CommandResult();
@@ -253,6 +247,22 @@ public sealed class SmartSurfaceBuildCommand : Command
         }
     }
 
+    private static string BoundaryBuildDetails(
+        CandidateConstructionPlan construction,
+        CandidateBuildOutcome outcome,
+        string separator)
+    {
+        if (!construction.UsesBoundaryTangency)
+        {
+            return string.Empty;
+        }
+
+        return $"{separator} supports={outcome.SupportedEdgeCount.ToString(CultureInfo.InvariantCulture)}"
+            + $"{separator} parents={outcome.ParentObjectCount.ToString(CultureInfo.InvariantCulture)}"
+            + $"{separator} continuity=G1_REQUESTED"
+            + $"{separator} point_spacing={outcome.PointSpacing.ToString("G6", CultureInfo.InvariantCulture)}";
+    }
+
     private static void WritePlan(
         BuildIdentity identity,
         RhinoDoc doc,
@@ -265,7 +275,7 @@ public sealed class SmartSurfaceBuildCommand : Command
         RhinoApp.WriteLine($"Version: {identity.Version}");
         RhinoApp.WriteLine($"Commit: {identity.Commit}");
         RhinoApp.WriteLine($"Units: {doc.ModelUnitSystem}");
-        RhinoApp.WriteLine("Mode: one in-memory preview; source geometry is unchanged; only Accept adds one Brep.");
+        RhinoApp.WriteLine("Mode: one in-memory preview; source geometry is unchanged; only Enter/Space/right-click adds one Brep; Esc cancels.");
         RhinoApp.WriteLine(
             $"Preflight: {preflight.Status.ToString().ToUpperInvariant()}"
             + $"; warnings={preflight.WarningCount.ToString(CultureInfo.InvariantCulture)}"

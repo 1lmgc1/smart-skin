@@ -82,6 +82,17 @@ public sealed class SurfaceStrategyRouter
                         60,
                         "Fallback when EdgeSrf quality or parameterization is unsuitable.");
                 }
+                else if (topology.OpenCurveCount >= 5
+                    && topology.OpenCurveCount <= 8
+                    && topology.BrepEdgeCount == topology.OpenCurveCount)
+                {
+                    AddCandidate(
+                        candidates,
+                        SurfaceStrategy.Patch,
+                        95,
+                        "Five to eight Brep edges form one closed loop whose owning trims can supply surface-normal constraints.");
+                    notes.Add("Candidate construction must verify that every selected edge is naked and has exactly one owning trim before requesting tangency.");
+                }
                 else
                 {
                     AddCandidate(

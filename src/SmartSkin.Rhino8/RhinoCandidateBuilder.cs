@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using Rhino.DocObjects;
 using Rhino.Geometry;
@@ -20,6 +21,9 @@ internal static class CandidateBuildCodes
     public const string InvalidCandidate = "P03_INVALID_CANDIDATE";
     public const string ResultLimit = "P03_RESULT_LIMIT";
     public const string NativeException = "P03_NATIVE_EXCEPTION";
+    public const string BoundaryContextMissing = "P05_BOUNDARY_CONTEXT_MISSING";
+    public const string BoundaryEdgeNotNaked = "P05_BOUNDARY_EDGE_NOT_NAKED";
+    public const string BoundaryTrimAmbiguous = "P05_BOUNDARY_TRIM_AMBIGUOUS";
 }
 
 internal sealed class CandidateBuildOutcome : IDisposable
@@ -30,7 +34,10 @@ internal sealed class CandidateBuildOutcome : IDisposable
         string message,
         Brep? candidate,
         int reversedCurveCount,
-        long elapsedMilliseconds)
+        long elapsedMilliseconds,
+        int supportedEdgeCount,
+        int parentObjectCount,
+        double pointSpacing)
     {
         Success = success;
         Code = code;
@@ -38,6 +45,9 @@ internal sealed class CandidateBuildOutcome : IDisposable
         Candidate = candidate;
         ReversedCurveCount = reversedCurveCount;
         ElapsedMilliseconds = elapsedMilliseconds;
+        SupportedEdgeCount = supportedEdgeCount;
+        ParentObjectCount = parentObjectCount;
+        PointSpacing = pointSpacing;
     }
 
     public bool Success { get; }
@@ -52,25 +62,41 @@ internal sealed class CandidateBuildOutcome : IDisposable
 
     public long ElapsedMilliseconds { get; }
 
+    public int SupportedEdgeCount { get; }
+
+    public int ParentObjectCount { get; }
+
+    public double PointSpacing { get; }
+
     public static CandidateBuildOutcome Succeeded(
         Brep candidate,
         int reversedCurveCount,
-        long elapsedMilliseconds)
+        long elapsedMilliseconds,
+        int supportedEdgeCount = 0,
+        int parentObjectCount = 0,
+        double pointSpacing = 0.0,
+        string? message = null)
     {
         return new CandidateBuildOutcome(
             true,
             CandidateBuildCodes.Built,
-            "One valid disposable Brep candidate was built in memory.",
+            message ?? "One valid disposable Brep candidate was built in memory.",
             candidate,
             reversedCurveCount,
-            elapsedMilliseconds);
+            elapsedMilliseconds,
+            supportedEdgeCount,
+            parentObjectCount,
+            pointSpacing);
     }
 
     public static CandidateBuildOutcome Failed(
         string code,
         string message,
         int reversedCurveCount,
-        long elapsedMilliseconds)
+        long elapsedMilliseconds,
+        int supportedEdgeCount = 0,
+        int parentObjectCount = 0,
+        double pointSpacing = 0.0)
     {
         return new CandidateBuildOutcome(
             false,
@@ -78,7 +104,10 @@ internal sealed class CandidateBuildOutcome : IDisposable
             message,
             null,
             reversedCurveCount,
-            elapsedMilliseconds);
+            elapsedMilliseconds,
+            supportedEdgeCount,
+            parentObjectCount,
+            pointSpacing);
     }
 
     public void Dispose()
@@ -115,6 +144,9 @@ internal sealed class RhinoCandidateBuilder
         var stopwatch = Stopwatch.StartNew();
         var duplicates = new List<Curve>(references.Count);
         var reversedCurveCount = 0;
+        var supportedEdgeCount = 0;
+        var parentObjectCount = 0;
+        var pointSpacing = 0.0;
         Brep? candidate = null;
 
         try
@@ -218,6 +250,29 @@ internal sealed class RhinoCandidateBuilder
 
                     break;
 
+                case SurfaceStrategy.Patch:
+                    candidate = BuildTangentBoundaryPatch(
+                        references,
+                        absoluteTolerance,
+                        out supportedEdgeCount,
+                        out parentObjectCount,
+                        out pointSpacing,
+                        out var patchFailureCode,
+                        out var patchFailureMessage);
+                    if (candidate is null)
+                    {
+                        return CandidateBuildOutcome.Failed(
+                            patchFailureCode,
+                            patchFailureMessage,
+                            reversedCurveCount,
+                            stopwatch.ElapsedMilliseconds,
+                            supportedEdgeCount,
+                            parentObjectCount,
+                            pointSpacing);
+                    }
+
+                    break;
+
                 default:
                     throw new ArgumentOutOfRangeException();
             }
@@ -255,7 +310,13 @@ internal sealed class RhinoCandidateBuilder
             return CandidateBuildOutcome.Succeeded(
                 candidate,
                 reversedCurveCount,
-                stopwatch.ElapsedMilliseconds);
+                stopwatch.ElapsedMilliseconds,
+                supportedEdgeCount,
+                parentObjectCount,
+                pointSpacing,
+                plan.UsesBoundaryTangency
+                    ? $"One valid disposable tangent Patch was built from {supportedEdgeCount.ToString(CultureInfo.InvariantCulture)} owning Brep trims."
+                    : null);
         }
         catch (Exception exception)
         {
@@ -296,6 +357,99 @@ internal sealed class RhinoCandidateBuilder
         }
 
         return (reference.Geometry() as Curve)?.DuplicateCurve();
+    }
+
+    private static Brep? BuildTangentBoundaryPatch(
+        IReadOnlyList<ObjRef> references,
+        double absoluteTolerance,
+        out int supportedEdgeCount,
+        out int parentObjectCount,
+        out double pointSpacing,
+        out string failureCode,
+        out string failureMessage)
+    {
+        supportedEdgeCount = 0;
+        parentObjectCount = 0;
+        pointSpacing = 0.0;
+        failureCode = CandidateBuildCodes.NativeConstructionFailed;
+        failureMessage = "Rhino did not return a tangent Patch candidate.";
+
+        var constraints = new List<GeometryBase>(references.Count);
+        var parentIds = new HashSet<Guid>();
+        var totalBoundaryLength = 0.0;
+
+        foreach (var reference in references)
+        {
+            var edge = reference.Edge();
+            if (edge is null)
+            {
+                failureCode = CandidateBuildCodes.BoundaryContextMissing;
+                failureMessage = "Every tangent Patch input must remain a selected Brep edge sub-object.";
+                return null;
+            }
+
+            if (edge.Valence != EdgeAdjacency.Naked || edge.TrimCount != 1)
+            {
+                failureCode = CandidateBuildCodes.BoundaryEdgeNotNaked;
+                failureMessage = "Every tangent Patch edge must be naked and bound exactly one adjacent face.";
+                return null;
+            }
+
+            var trimIndices = edge.TrimIndices();
+            if (trimIndices.Length != 1)
+            {
+                failureCode = CandidateBuildCodes.BoundaryTrimAmbiguous;
+                failureMessage = "Rhino did not expose exactly one owning trim for a selected boundary edge.";
+                return null;
+            }
+
+            var owner = edge.Brep;
+            var trimIndex = trimIndices[0];
+            if (owner is null || trimIndex < 0 || trimIndex >= owner.Trims.Count)
+            {
+                failureCode = CandidateBuildCodes.BoundaryContextMissing;
+                failureMessage = "A selected edge lost its owning Brep or trim before Patch construction.";
+                return null;
+            }
+
+            var trim = owner.Trims[trimIndex];
+            if (trim.Edge is null
+                || trim.Edge.EdgeIndex != edge.EdgeIndex
+                || trim.Face is null)
+            {
+                failureCode = CandidateBuildCodes.BoundaryContextMissing;
+                failureMessage = "A selected edge does not provide a stable adjacent-face trim for tangency.";
+                return null;
+            }
+
+            constraints.Add(trim);
+            supportedEdgeCount++;
+            parentIds.Add(reference.ObjectId);
+            totalBoundaryLength += edge.GetLength();
+        }
+
+        parentObjectCount = parentIds.Count;
+        if (supportedEdgeCount < 5 || supportedEdgeCount > CandidateConstructionPolicy.MaximumTangentPatchEdgeCount)
+        {
+            failureCode = CandidateBuildCodes.BoundaryContextMissing;
+            failureMessage = "Tangent Patch construction accepts five to eight supported Brep edges.";
+            return null;
+        }
+
+        pointSpacing = Math.Max(absoluteTolerance * 10.0, totalBoundaryLength / 160.0);
+        var fixedStartingEdges = new[] { false, false, false, false };
+        return Brep.CreatePatch(
+            constraints,
+            startingSurface: null,
+            uSpans: 8,
+            vSpans: 8,
+            trim: true,
+            tangency: true,
+            pointSpacing: pointSpacing,
+            flexibility: 1.0,
+            surfacePull: 0.0,
+            fixEdges: fixedStartingEdges,
+            tolerance: absoluteTolerance);
     }
 
     private static IReadOnlyList<Curve>? OrderClosedEdgeLoop(

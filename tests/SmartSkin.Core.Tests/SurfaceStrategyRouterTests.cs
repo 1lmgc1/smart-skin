@@ -68,6 +68,24 @@ public sealed class SurfaceStrategyRouterTests
     }
 
     [Fact]
+    public void Route_SixBrepEdgeClosedLoop_UsesContextualPatch()
+    {
+        var report = Route(
+            OpenEdge("a", Point(0.0, 0.0), Point(4.0, 0.0)),
+            OpenEdge("b", Point(4.0, 0.0), Point(7.0, 2.0)),
+            OpenEdge("c", Point(7.0, 2.0), Point(5.0, 6.0)),
+            OpenEdge("d", Point(5.0, 6.0), Point(1.0, 6.0)),
+            OpenEdge("e", Point(1.0, 6.0), Point(-1.0, 2.0)),
+            OpenEdge("f", Point(-1.0, 2.0), Point(0.0, 0.0)));
+
+        Assert.Equal(RouteStatus.Ready, report.Status);
+        Assert.Equal(TopologyKind.ClosedBoundaryLoop, report.Topology.Kind);
+        Assert.Equal(6, report.Topology.BrepEdgeCount);
+        AssertPrimary(report, SurfaceStrategy.Patch);
+        Assert.Contains(report.Notes, note => note.Contains("naked"));
+    }
+
+    [Fact]
     public void Route_DisconnectedOpenCurves_PrefersLoft()
     {
         var report = Route(
@@ -187,7 +205,7 @@ public sealed class SurfaceStrategyRouterTests
 
         var line = report.ToMachineLine(identity, 12, 12);
 
-        Assert.StartsWith("SMARTSKIN_P04F1 PASS", line);
+        Assert.StartsWith("SMARTSKIN_P05 PASS", line);
         Assert.Contains("route_status=READY", line);
         Assert.Contains("topology=SINGLE_CLOSED_BOUNDARY", line);
         Assert.Contains("primary=PLANAR_SRF", line);
@@ -227,9 +245,26 @@ public sealed class SurfaceStrategyRouterTests
         Point3Value start,
         Point3Value end)
     {
+        return OpenCurve(label, GeometryKind.Curve, start, end);
+    }
+
+    private static GeometrySnapshot OpenEdge(
+        string label,
+        Point3Value start,
+        Point3Value end)
+    {
+        return OpenCurve(label, GeometryKind.BrepEdge, start, end);
+    }
+
+    private static GeometrySnapshot OpenCurve(
+        string label,
+        GeometryKind kind,
+        Point3Value start,
+        Point3Value end)
+    {
         return new GeometrySnapshot(
             label,
-            GeometryKind.Curve,
+            kind,
             true,
             new Bounds3Value(
                 new Point3Value(

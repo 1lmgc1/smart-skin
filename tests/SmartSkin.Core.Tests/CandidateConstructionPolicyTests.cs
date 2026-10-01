@@ -104,6 +104,28 @@ public sealed class CandidateConstructionPolicyTests
     }
 
     [Fact]
+    public void Evaluate_SixBrepEdgeBoundary_IsReadyForTangentPatch()
+    {
+        var snapshots = new[]
+        {
+            OpenEdge("a", Point(0.0, 0.0), Point(4.0, 0.0)),
+            OpenEdge("b", Point(4.0, 0.0), Point(7.0, 2.0)),
+            OpenEdge("c", Point(7.0, 2.0), Point(5.0, 6.0)),
+            OpenEdge("d", Point(5.0, 6.0), Point(1.0, 6.0)),
+            OpenEdge("e", Point(1.0, 6.0), Point(-1.0, 2.0)),
+            OpenEdge("f", Point(-1.0, 2.0), Point(0.0, 0.0))
+        };
+
+        var plan = Evaluate(snapshots);
+
+        Assert.True(plan.IsReady);
+        Assert.True(plan.UsesBoundaryTangency);
+        Assert.Equal(SurfaceStrategy.Patch, plan.Strategy);
+        Assert.Equal(CandidateConstructionCodes.TangentPatchReady, plan.Code);
+        Assert.Equal(6, plan.CurveCount);
+    }
+
+    [Fact]
     public void Evaluate_SelectionAboveConstructionCurveLimit_IsBlocked()
     {
         var snapshots = new[]
@@ -170,9 +192,28 @@ public sealed class CandidateConstructionPolicyTests
         Point3Value end,
         int spanCount = 1)
     {
+        return OpenCurve(label, GeometryKind.Curve, start, end, spanCount);
+    }
+
+    private static GeometrySnapshot OpenEdge(
+        string label,
+        Point3Value start,
+        Point3Value end,
+        int spanCount = 1)
+    {
+        return OpenCurve(label, GeometryKind.BrepEdge, start, end, spanCount);
+    }
+
+    private static GeometrySnapshot OpenCurve(
+        string label,
+        GeometryKind kind,
+        Point3Value start,
+        Point3Value end,
+        int spanCount)
+    {
         return new GeometrySnapshot(
             label,
-            GeometryKind.Curve,
+            kind,
             true,
             new Bounds3Value(
                 new Point3Value(
