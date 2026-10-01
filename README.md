@@ -2,7 +2,7 @@
 
 Rhino 8 surface-assistance plug-in. The intended product is a small, dependable command that diagnoses irregular curve/edge frameworks, infers a likely surface strategy, builds candidates and returns a native Rhino result with an explanation.
 
-## Current patch: P02 topology classifier and strategy router
+## Current state: P02 verified
 
 P00 proved the repository → CI → artifact → Rhino field-test loop and is `VERIFIED` in Rhino 8.18.
 
@@ -57,6 +57,12 @@ P02 deliberately stops at an explained plan. It does not create preview or
 document geometry, does not repair gaps, and does not claim internal
 intersection families or G0/G1/G2 continuity that it has not measured.
 `SmartSurfacePlan` also verifies the document object count before returning.
+GitHub Actions run 9 restored, built, ran all 23 Core tests, packaged the
+plug-in and passed the installer lifecycle for commit
+`450bf1e28b77abdb5e17ca6b06fa5c1564963a5b`. Rhino 8.18 field testing verified
+the `PlanarSrf`, `EdgeSrf`, `Loft` and blocked open-chain routes, cancellation
+without mutation and the same section route after a full Rhino restart. P02 is
+`VERIFIED`.
 
 ## Projects
 
@@ -94,8 +100,8 @@ Extract the artifact, close Rhino and run `INSTALL.cmd`, then follow [`docs/FIEL
 1. P00 — reproducible build/load loop (`VERIFIED`).
 2. P01 — read-only GeometryReport/Preflight.
 3. P01F1 — preserve top-level versus sub-object selection identity (`VERIFIED`).
-4. P02 — input topology classification and candidate routing without geometry mutation (current patch).
-5. P03 — construct disposable candidates only after P02 is verified in Rhino.
+4. P02 — input topology classification and candidate routing without geometry mutation (`VERIFIED`).
+5. P03 — construct disposable candidates (next; not started).
 
 ## Data and licensing
 

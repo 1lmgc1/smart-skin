@@ -83,6 +83,27 @@ not start Rhino.
 - No completed or cancelled command changes document geometry.
 - The managed update and section route survive a full Rhino restart.
 
+## Recorded reference result
+
+P02 is `VERIFIED` in Rhino 8.18 for field build commit
+`450bf1e28b77abdb5e17ca6b06fa5c1564963a5b`. GitHub Actions run 9 completed
+Restore, Release build, all 23 Core tests, packaging and the installer lifecycle.
+The managed field installation reported `0.0.4-p02` at the expected `current`
+path.
+
+The field test confirmed `SINGLE_CLOSED_BOUNDARY` / `PLANAR_SRF`, a four-segment
+`CLOSED_BOUNDARY_LOOP` / `EDGE_SRF` with the expected endpoint graph, and a
+two-circle `SECTION_SET` / `LOFT`. The closed-loop document contained other
+objects, so its object-count invariant was `6->6` rather than the isolated
+protocol's `4->4`. The open-chain branch was exercised with two adjacent
+segments rather than three and correctly returned `BLOCKED`, `OPEN_CHAIN` and
+`primary=NONE` with `objects=6->6`.
+
+Cancelling `SmartSurfacePlan` before selection left the saved two-circle
+document at `objects=2`. After Rhino was fully closed, the saved file reopened
+under the same P02 commit and again returned `SECTION_SET`, `primary=LOFT` and
+`objects=2->2`.
+
 ## Return this evidence
 
 ```text
