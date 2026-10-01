@@ -1,44 +1,45 @@
-# Smart Skin handoff
+# Smart Skin handoff - P04 source checkpoint
 
-## Current state
+## Published baseline and local work
 
-P00, P01F1, and P02 are `VERIFIED` in Rhino 8.18. P03 commit
-`acdcba9cc0586a769bae7a97ed61dadf74055573` passed GitHub Actions run 11 and
-field verification for bounded PlanarSrf, EdgeSrf, and two-section Loft
-preview/Accept, Cancel/Esc, blocked open chain, Undo, save, and restart.
+The verified runtime remains P03F1, version 0.0.6-p03f1, commit
+`ada5c269c9d270e44952fcc297b611236c4a4782`. See `P03F1_CLOSURE.md` for the existing
+CI/field evidence. Do not install a documentation-only rebuild or repeat its
+closed test suite just because a session changed.
 
-The field test exposed one diagnostic defect: `RhinoDoc.Objects.Count` includes
-deleted Undo records. Geometry and Undo were correct, but machine lines could
-report historical totals. P03F1 version `0.0.6-p03f1` changes only that shared
-Rhino-adapter counter and is `VERIFIED` on runtime commit
-`ada5c269c9d270e44952fcc297b611236c4a4782`; see `P03F1_CLOSURE.md`.
+A separate documentation closure and P04 implementation are now local commits.
+P04 is 0.0.8-p04, one native toolbar and button, with all production C# unchanged.
+This source checkpoint is not the publication kit and contains no compiled P04.
+The interrupted 0.0.7-p04/v001 and its old SHA values are historical only.
 
-## Source of truth
+## Source of truth and delivery
 
-Repository: <https://github.com/1lmgc1/smart-skin>
-
-The repository is authoritative for code, workflows, commits, and build
-artifacts. The Google Drive project journal stores distilled decisions and
-checkpoint summaries.
-
-## Current patch
-
-`RhinoDocumentMetrics.ActiveObjectCount` enumerates active saved objects,
-including normal, locked, and hidden objects, while excluding deleted Undo
-records and non-document/reference helper objects. Version, Preflight, Plan,
-and Build use this one counter. P03 construction code and source-geometry
-handling are unchanged.
+Repository: <https://github.com/1lmgc1/smart-skin>.
+The repository is authoritative for published source, workflows and artifacts.
+A versioned full-history bundle backs up unpushed checkpoint commits. The Drive
+journal stores decisions, exact checkpoint identity, location and status.
+No direct file-by-file connector push, browser editor, or force-push replaces
+the immutable kit route in UPLOAD.md.
 
 ## Resume procedure
 
-1. Read `README.md`, `AGENTS.md`, `docs/PATCH_NOTES.md`, and
-   `docs/FIELD_TEST.md`.
-2. Inspect the latest GitHub Actions run and exact commit SHA.
-3. Preserve the verified P03F1 runtime; do not reinstall a docs-only rebuild.
-4. Use `P03F1_CLOSURE.md` for the already-reviewed count/Undo/restart evidence.
-5. Prepare the separate minimal toolbar patch with its own CI and GUI gate.
+1. Read AGENTS, P03F1_CLOSURE, PATCH_NOTES, P04_TOOLBAR and FIELD_TEST.
+2. Restore the exact checkpoint bundle and check the base/closure/target SHA
+   against its manifest. Inspect remote main; do not assume it is unchanged.
+3. Perform queue P04.3: targeted diff/identity checks, PowerShell parsing and
+   execution tests, publish-script harness (base, already-applied, wrong base,
+   corrupted package). A Linux parse is not a Windows lifecycle execution.
+4. Complete P04.4: immutable SmartSkin-P04-v002 kit and durable, read-back-checked
+   copy. User runs RUN_P04.cmd only after that kit is explicitly delivered.
+5. Check green build-p04 for the exact target, download and verify its artifact.
+6. Managed install with Rhino closed, then focused GUI FIELD_TEST. Do not assign
+   VERIFIED to P04 until visibility, button behavior and UI lifecycle pass.
+7. Close P04 and sync repository/Drive documentation. No P05 before review.
 
-## Next product patch
+## Current limitations
 
-The next separate objective is a minimal Rhino toolbar with a primary
-`SmartSurfaceBuild` button. A large options panel is not yet justified.
+No P04 Windows build or Rhino execution has occurred at this checkpoint.
+Native same-name RUI deployment was chosen from McNeel documentation. It avoids
+load-order tricks and shared settings edits, but a missed first-load toolbar or
+stale UI after uninstall must be diagnosed in the field rather than hidden by
+manual import or Rhino-wide reset.

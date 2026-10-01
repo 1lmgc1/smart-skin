@@ -1,74 +1,59 @@
-# P03F1 Active Document Count — patch notes
+# P04 Native One-Button Toolbar - source checkpoint
 
-Version: `0.0.6-p03f1`
+Version: `0.0.8-p04`. Planned publication kit: `SmartSkin-P04-v002`.
+Baseline: `ada5c269c9d270e44952fcc297b611236c4a4782` (P03F1 VERIFIED).
+Prior closure evidence: `P03F1_CLOSURE.md`.
 
-## Goal
+## Single objective
 
-Correct every Smart Skin document-count diagnostic so `objects=` means active,
-saved Rhino document objects rather than the size of Rhino's component table,
-which also retains deleted objects for Undo.
-
-## Field evidence that triggered the fix
-
-P03 commit `acdcba9cc0586a769bae7a97ed61dadf74055573` passed GitHub Actions run 11
-and the Rhino 8.18 construction protocol:
-
-- PlanarSrf preview, Accept, source retention, and Undo worked;
-- an unordered four-edge loop previewed and accepted one EdgeSrf;
-- Loft preview, Cancel, Accept, Undo, save, and restart worked;
-- an open chain blocked before preview and selection Esc cancelled safely;
-- every accepted candidate was one Brep and every source curve remained.
-
-After PlanarSrf Undo, only the source circle remained selectable, but
-`SmartSurfaceVersion` printed `objects=2`. Repeated EdgeSrf tests similarly
-reported increasing totals after successful Undo. The surface behavior was
-correct; the diagnostic used `RhinoDoc.Objects.Count`, whose contract includes
-deleted records retained for Undo.
-
-Official RhinoCommon API basis:
-
-- `ObjectTable.Count` returns all items, including deleted ones:
-  <https://mcneel.github.io/rhinocommon-api-docs/api/RhinoCommon/html/T_Rhino_DocObjects_Tables_ObjectTable.htm>.
-- `ObjectEnumeratorSettings.ActiveObjects` returns objects in the current model
-  that are saved in the file, while the deleted-object filter is separate:
-  <https://mcneel.github.io/rhinocommon-api-docs/api/RhinoCommon/html/T_Rhino_DocObjects_ObjectEnumeratorSettings.htm>.
+Make the existing SmartSurfaceBuild command available through one native
+Smart Skin toolbar button. No second builder, options panel or new solver.
 
 ## Included
 
-- Add one Rhino-adapter helper that enumerates active, saved document objects.
-- Include normal, locked, and hidden active objects.
-- Exclude deleted Undo records, instance-definition contents, reference
-  objects, grips, lights, and phantoms.
-- Use the same helper in `SmartSurfaceVersion`, `SmartSurfacePreflight`,
-  `SmartSurfacePlan`, and `SmartSurfaceBuild`.
-- Retain all P03 constructors, bounds, copy-only source handling, preview, and
-  explicit Accept/Cancel behavior without modification.
-- Update patch identity, packaging, installer metadata, CI names, and the
-  focused Rhino field protocol.
+- One same-name `SmartSkin.Rhino8.rui` beside `SmartSkin.Rhino8.rhp`.
+- One visible legacy toolbar group (converted to a container by Rhino 8),
+  one toolbar, one left-click macro `! _SmartSurfaceBuild` and one button.
+- Stable UI GUIDs, original PNG glyphs at 16/24/32, English/Russian tooltips.
+- RUI copy in build/publish output, package validation and delivery.
+- Managed installer requires and validates RUI before modifying installation;
+  verifies its hash after staging and installation; records toolbar_sha256.
+- Known-file migration/uninstall includes this RUI, never shared Rhino UI
+  settings or unrelated toolbars.
+- Lifecycle coverage extends to RUI presence, hash, failed missing-RUI update,
+  old RUI cleanup, one installed copy after update and unrelated-file retention.
+- CI keeps all existing Core tests and validates the RUI; installer lifecycle
+  runs under Windows PowerShell, matching the existing powershell.exe launcher.
 
-## Invariants
+## Invariants and intentionally untouched areas
 
-- A deleted or undone candidate does not contribute to `objects=`.
-- `Cancel`, Esc, blocked input, and handled native failure return
-  `objects=N->N` using active object counts.
-- `Accept` returns `objects=N->N+1`.
-- `Undo` followed by `SmartSurfaceVersion` returns N.
-- No source geometry is deleted, replaced, transformed, reversed, or edited.
+Every production C# file in Core and Rhino8 stays byte-for-byte identical to
+P03F1, including selection, geometry snapshot, routing, constructors, preview,
+Accept/Cancel, active counts, plug-in load code and plug-in GUID. Test-source
+changes are limited to expected patch identity. Target frameworks and packages
+stay unchanged. The macro has no SelNone, Enter, Accept, second command or
+right-click action. The leading ! cancels a current command using normal Rhino
+macro behavior; P04 does not define new selection behavior.
 
-## Intentionally not included
+No Rhino-wide reset, startup script injection, forced docking, cached-RUI
+sweep, registry layout manipulation or repeated programmatic toolbar import.
+Native loading is intentional; visibility and persistence are still field
+test gates, not properties proven by XML parsing.
 
-- No constructor, routing, topology, repair, or quality-ranking changes.
-- No toolbar or panel. The field test confirmed that command-line-only use is
-  inefficient; a minimal `SmartSurfaceBuild` toolbar is the next separate
-  product patch.
-- No change to the existing P03 machine codes such as `P03_ACCEPTED` and
-  `P03_ROUTE_NOT_READY`; only the build identity becomes `P03F1`.
+## Verification status at this checkpoint
 
-## Verification status
+- P03F1 remains VERIFIED on its original runtime; no new Rhino run is claimed.
+- P04 source is implemented. Bounded local XML/PNG/version/diff inspection is
+  recorded with the source checkpoint, not presented as CI or runtime proof.
+- P04 Windows compilation, current 31 Core tests, PowerShell parser/execution,
+  RUI validator execution, packaging and installer lifecycle are NOT VERIFIED.
+- P04 initial visibility, command demand-load, preselection, duplicate-free
+  restart and UI cleanup are NOT VERIFIED until FIELD_TEST.md passes.
+- No P04 publication kit or compiled P04 artifact is delivered by this commit.
 
-P03F1 is `VERIFIED` on runtime commit
-`ada5c269c9d270e44952fcc297b611236c4a4782`: GitHub Actions run 12 passed build,
-31/31 Core tests, packaging and installer lifecycle; the existing Rhino 8.18
-count/Undo/restart field results were closed in journal record 017.
-See `P03F1_CLOSURE.md` for provenance. This closure does not claim a new Rhino
-run and does not require reinstalling or retesting the unchanged runtime.
+## Next gate
+
+Queue P04.3: targeted source/script checks, parser checks and publication
+harness tests. Then P04.4: immutable v002 kit, exact base/target hashes, full
+bundle and verified durable backup. Only then publication, exact green CI,
+managed installation and the focused GUI test. P05 remains blocked.

@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Preflight and the P02 topology classifier/router are read-only. P03 may build one bounded disposable PlanarSrf, EdgeSrf or two-section Loft candidate from copies, preview it, and add exactly one Brep only after explicit `Accept`. P03F1 changes only document-count diagnostics so deleted Undo records are excluded. It must never repair, replace or transform source geometry.
+Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Preflight and the P02 topology classifier/router are read-only. P03 may build one bounded disposable PlanarSrf, EdgeSrf or two-section Loft candidate from copies, preview it, and add exactly one Brep only after explicit `Accept`. P03F1 changes only document-count diagnostics so deleted Undo records are excluded. P04 adds a native same-name RUI and its delivery lifecycle; all production C# geometry, selection and counting code remains unchanged. It must never repair, replace or transform source geometry.
 
 ## Patch discipline
 
@@ -11,6 +11,8 @@ Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Pre
 - Use `VERIFIED`, `STATICALLY CHECKED` and `NOT VERIFIED` literally.
 - Do not start the next patch before reviewing the previous field test.
 - Never overwrite a released bundle; increment the version.
+- P04 restarts as version `0.0.8-p04`, planned publication kit `SmartSkin-P04-v002`; do not impersonate the interrupted `0.0.7-p04`/v001 draft.
+- Preserve fixed plug-in and UI GUIDs. Never reset Rhino layouts or delete shared UI settings to repair a toolbar.
 
 ## Safety invariants
 
@@ -33,5 +35,5 @@ Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Pre
 dotnet restore SmartSkin.sln
 dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=local
 dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --no-build
-.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.6-p03f1 -Commit local
+.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.8-p04 -Commit local
 ```

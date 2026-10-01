@@ -1,78 +1,66 @@
-# P03F1 Rhino 8 field test
+# P04 Rhino 8.18 GUI field test - do not run before the CI gate
 
-Use only the ZIP produced by a successful `build-p03f1` run for the exact
-commit being tested. P03F1 changes document-count diagnostics only. The P03
-PlanarSrf, EdgeSrf, Loft, preview, Accept, Cancel, Undo, blocked-input, and
-restart paths were field-tested on commit
-`acdcba9cc0586a769bae7a97ed61dadf74055573`.
+Use only the artifact from a successful build-p04 for the exact published
+P04 commit. Expected version: 0.0.8-p04. This is a focused toolbar integration
+test, not a repeat of the full P03/P03F1 geometry suite.
 
-## Install
+## Install gate
 
-1. Close every Rhino window and confirm `Rhino.exe` is no longer running.
-2. Extract the P03F1 artifact to a new folder.
-3. Run `INSTALL.cmd`; wait for `SMARTSKIN_INSTALL PASS`.
-4. Confirm `version=0.0.6-p03f1` and the managed path ending in
-   `\AppData\Local\SmartSkin\Rhino8\current\SmartSkin.Rhino8.rhp`.
-5. Start Rhino normally. Do not manually register the downloaded `.rhp`.
+Close all Rhino windows and ensure Rhino.exe is stopped. Extract the exact
+CI artifact to a new folder; run INSTALL.cmd. Stop on any FAIL. Keep
+SMARTSKIN_INSTALL PASS, confirm version, managed current path and toolbar hash.
+Do not drag-register an RHP, manually import RUI, or reset the Rhino UI.
 
-If install fails, return the complete `SMARTSKIN_INSTALL FAIL` line and stop.
+## A - first-load visibility and demand-loading
 
-## Test A — identity and active count
+Start Rhino normally. Before typing any Smart Skin command, verify one Smart
+Skin toolbar/container with one visible button and a nonblank glyph/tooltip.
+In a blank document create one Circle, leave it selected and click the button.
+The command must run without a prior SmartSurfaceVersion call. Observe whether
+preselection is honored exactly as by the existing SmartSurfaceBuild; do not
+change selection options as a workaround. If the toolbar is not visible,
+record that failure before attempting anything else.
 
-1. Open a blank millimetre document.
-2. Run `SmartSurfaceVersion`.
-3. Confirm `Patch: P03F1`, `Version: 0.0.6-p03f1`, the artifact commit, and
-   `objects=0`.
+## B - preview, explicit commit and Undo through the button
 
-## Test B — Accept, Undo, and corrected count
+For that Circle finish selection if prompted, inspect the preview and choose
+Accept explicitly. Keep strategy=PLANAR_SRF, action=ACCEPTED, built=1, added=1,
+objects=1->2 with patch=P04 and the exact commit. Undo must remove only the
+new surface; SmartSurfaceVersion must then report objects=1 and 0.0.8-p04.
 
-1. Create one ordinary circle.
-2. Run `SmartSurfaceBuild`, select the circle, finish selection, and choose
-   `Accept` after the cyan preview appears.
-3. Keep the machine line with `strategy=PLANAR_SRF`, `action=ACCEPTED`,
-   `built=1`, `added=1`, and `objects=1->2`.
-4. Run `Undo`; confirm only the new surface disappears.
-5. Run `SmartSurfaceVersion` and confirm `objects=1`, not `objects=2`.
+Click empty viewport space to clear selection. Click the button, select the
+Circle after command start, finish selection and choose Cancel. Confirm
+preview disappears and objects=1->1. Click the button again without a
+preselection and press Esc before selecting anything: expect
+P03_SELECTION_CANCELLED, objects=1->1. That P03 code is intentionally retained.
 
-## Test C — deleted input is excluded
+## C - UI persistence and ordinary hide/show
 
-1. In a blank document create a rectangle, explode it, and delete one side.
-2. Run `SmartSurfaceBuild` on the three remaining segments.
-3. Confirm no preview appears and keep the line with `action=BLOCKED`,
-   `code=P03_ROUTE_NOT_READY`, and `objects=3->3`.
-4. Click empty viewport space to clear selection, run `SmartSurfaceBuild`, and
-   press Esc before selecting geometry.
-5. Confirm `action=CANCELLED`, `code=P03_SELECTION_CANCELLED`, and
-   `objects=3->3`.
+Hide and show only the Smart Skin toolbar using native Rhino controls. The
+button should not duplicate. Leave it visible, fully close Rhino, restart,
+and verify one toolbar and one button without reimporting the RUI. Repeat a
+button-driven preview and Cancel. Record unexpected selection or load behavior.
 
-## Test D — saved document and restart
+## D - update and uninstall scope
 
-1. Open the saved two-circle P03 Loft test document.
-2. Run `SmartSurfaceVersion`; confirm `objects=2`.
-3. Run `SmartSurfaceBuild` on both circles, verify the preview, choose
-   `Cancel`, and confirm `objects=2->2`.
-4. Fully close Rhino, reopen the file, and repeat `SmartSurfaceVersion` once.
+With Rhino closed, reinstall the same green artifact. Restart and confirm no
+duplicate buttons/containers and no unexpected changes to other toolbars.
+Then close Rhino, run this artifact's UNINSTALL.cmd and restart. Record whether
+the Smart Skin button/container remains, and whether native UI emits warnings.
+Do not delete Rhino settings or unrelated cached RUI files to manufacture PASS.
+The installer owns its current directory/registration and this RUI; automatic
+removal of Rhino-maintained UI references is a field condition, not yet proven.
+Any remaining stale UI is a P04 blocker to diagnose, not an accepted workaround.
 
-## Pass criteria
+Finish with Rhino closed and reinstall the same verified P04 artifact. Confirm
+one usable toolbar after startup. If a GUI defect prevents use, restore the
+previously verified P03F1 artifact with the same managed installation procedure
+and record the P04 failure; do not leave the user without the working plug-in.
 
-- Identity matches the exact CI artifact.
-- Object fields count active saved document objects and exclude deleted Undo
-  records.
-- Accept still adds exactly one Brep; Undo removes only that Brep.
-- Blocked and cancelled paths change nothing.
-- Loading, counting, preview, and cancellation work after restart.
+## Return evidence
 
-## Return this evidence
-
-```text
-install_machine_line:
-version_blank_machine_line:
-planar_accept_machine_line:
-version_after_undo_machine_line:
-open_chain_machine_line:
-selection_cancel_machine_line:
-saved_document_machine_line:
-after_restart_machine_line:
-result: PASS / FAIL
-complete_error_if_any:
-```
+Keep the exact install/version/Accept/Undo/Cancel/Esc machine lines, screenshot
+of the toolbar, first-click/preselection observation, restart/update and
+uninstall/reinstall results. Send complete errors. Do not publish user models
+or screenshots to the public repository. VERIFIED requires all these gates;
+a valid RUI or a green CI run alone is not a Rhino field PASS.

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "0.0.6-p03f1",
+    [string]$Version = "0.0.8-p04",
     [string]$Commit = "local",
     [string]$OutputRoot = ""
 )
@@ -38,6 +38,7 @@ foreach ($TargetFramework in @("net48")) {
     $Source = Join-Path $RepoRoot "src\SmartSkin.Rhino8\bin\$Configuration\$TargetFramework"
     $Rhp = Join-Path $Source "SmartSkin.Rhino8.rhp"
     $Core = Join-Path $Source "SmartSkin.Core.dll"
+    $Rui = Join-Path $Source "SmartSkin.Rhino8.rui"
 
     if (-not (Test-Path $Rhp)) {
         throw "Required plug-in output not found: $Rhp"
@@ -46,11 +47,14 @@ foreach ($TargetFramework in @("net48")) {
         throw "Required core output not found: $Core"
     }
 
+    & (Join-Path $PSScriptRoot "Test-Toolbar.ps1") -RuiPath $Rui
+
     $Destination = Join-Path $Stage $TargetFramework
     New-Item -ItemType Directory -Force $Destination | Out-Null
 
     foreach ($Name in @(
         "SmartSkin.Rhino8.rhp",
+        "SmartSkin.Rhino8.rui",
         "SmartSkin.Rhino8.pdb",
         "SmartSkin.Rhino8.deps.json",
         "SmartSkin.Core.dll",
@@ -70,7 +74,8 @@ foreach ($Name in @(
     "INSTALL.cmd",
     "UNINSTALL.cmd",
     "Install-SmartSkin.ps1",
-    "Uninstall-SmartSkin.ps1"
+    "Uninstall-SmartSkin.ps1",
+    "Test-Toolbar.ps1"
 )) {
     $InstallerFile = Join-Path (Join-Path $RepoRoot "scripts") $Name
     if (-not (Test-Path -LiteralPath $InstallerFile -PathType Leaf)) {
@@ -82,10 +87,12 @@ foreach ($Name in @(
 @(
     "package=$PackageName"
     "version=$Version"
-    "patch=P03F1"
+    "patch=P04"
     "commit=$Commit"
     "configuration=$Configuration"
     "installer=managed-v1"
+    "toolbar=SmartSkin.Rhino8.rui"
+    "toolbar_sha256=$((Get-FileHash -LiteralPath (Join-Path $Stage 'net48\SmartSkin.Rhino8.rui') -Algorithm SHA256).Hash)"
     "created_utc=$([DateTime]::UtcNow.ToString('o'))"
 ) | Set-Content (Join-Path $Stage "build-info.txt") -Encoding UTF8
 

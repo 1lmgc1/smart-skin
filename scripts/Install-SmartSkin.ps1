@@ -14,9 +14,10 @@ $ErrorActionPreference = "Stop"
 
 $PluginGuid = "b3f42f21-1f15-45e6-9bc2-a68b0b27c877"
 $PluginName = "Smart Skin"
-$Version = "0.0.6-p03f1"
+$Version = "0.0.8-p04"
 $KnownPluginFiles = @(
     "SmartSkin.Rhino8.rhp",
+    "SmartSkin.Rhino8.rui",
     "SmartSkin.Rhino8.pdb",
     "SmartSkin.Rhino8.deps.json",
     "SmartSkin.Core.dll",
@@ -117,6 +118,7 @@ try {
     $SourceDirectory = Join-Path $ResolvedPackageRoot "net48"
     $SourceRhp = Join-Path $SourceDirectory "SmartSkin.Rhino8.rhp"
     $SourceCore = Join-Path $SourceDirectory "SmartSkin.Core.dll"
+    $SourceRui = Join-Path $SourceDirectory "SmartSkin.Rhino8.rui"
 
     if (-not (Test-Path -LiteralPath $SourceRhp -PathType Leaf)) {
         throw "Package is incomplete: $SourceRhp was not found."
@@ -124,6 +126,13 @@ try {
     if (-not (Test-Path -LiteralPath $SourceCore -PathType Leaf)) {
         throw "Package is incomplete: $SourceCore was not found."
     }
+
+    $ToolbarValidator = Join-Path $ResolvedPackageRoot "Test-Toolbar.ps1"
+    if (-not (Test-Path -LiteralPath $ToolbarValidator -PathType Leaf)) {
+        throw "Package is incomplete: Test-Toolbar.ps1 was not found."
+    }
+    & $ToolbarValidator -RuiPath $SourceRui
+    $SourceRuiHash = (Get-FileHash -LiteralPath $SourceRui -Algorithm SHA256).Hash
 
     if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
         throw "LOCALAPPDATA is unavailable."
@@ -157,6 +166,7 @@ try {
 
     $StagedRhp = Join-Path $StagingDirectory "SmartSkin.Rhino8.rhp"
     $StagedCore = Join-Path $StagingDirectory "SmartSkin.Core.dll"
+    $StagedRui = Join-Path $StagingDirectory "SmartSkin.Rhino8.rui"
     if (-not (Test-Path -LiteralPath $StagedRhp -PathType Leaf) -or
         -not (Test-Path -LiteralPath $StagedCore -PathType Leaf)) {
         throw "Staging validation failed."
@@ -168,12 +178,17 @@ try {
         throw "Staged plug-in hash does not match the package."
     }
 
+    if ((Get-FileHash -LiteralPath $StagedRui -Algorithm SHA256).Hash -ne $SourceRuiHash) {
+        throw "Staged toolbar hash does not match the package."
+    }
+
     [ordered]@{
         product = $PluginName
         version = $Version
         plugin_guid = $PluginGuid
         installed_utc = [DateTime]::UtcNow.ToString("o")
         source_sha256 = $SourceHash
+        toolbar_sha256 = $SourceRuiHash
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $StagingDirectory "install-info.json") -Encoding UTF8
 
     $RegistryKeys = @(Get-SmartSkinRegistryKeys $RegistryBase $PluginGuid)
@@ -198,6 +213,10 @@ try {
 
         if ((Get-FileHash -LiteralPath $DestinationRhp -Algorithm SHA256).Hash -ne $SourceHash) {
             throw "Installed plug-in hash does not match the package."
+        }
+        $InstalledRui = Join-Path $CurrentDirectory "SmartSkin.Rhino8.rui"
+        if ((Get-FileHash -LiteralPath $InstalledRui -Algorithm SHA256).Hash -ne $SourceRuiHash) {
+            throw "Installed toolbar hash does not match the package."
         }
     }
     catch {
@@ -239,7 +258,7 @@ try {
 
     Write-Host "Smart Skin $Version installed for Rhino 8."
     Write-Host "Old registered Smart Skin files removed: $RemovedOldFiles"
-    Write-Host "SMARTSKIN_INSTALL PASS | version=$Version | removed_old_files=$RemovedOldFiles | path=$DestinationRhp"
+    Write-Host "SMARTSKIN_INSTALL PASS | version=$Version | removed_old_files=$RemovedOldFiles | path=$DestinationRhp | toolbar_sha256=$SourceRuiHash"
 }
 catch {
     Write-Host "SMARTSKIN_INSTALL FAIL | version=$Version | error=$($_.Exception.Message)"

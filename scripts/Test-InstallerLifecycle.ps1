@@ -32,6 +32,8 @@ try {
     New-Item -ItemType Directory -Path $OldDirectory -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $PackageRoot "net48\SmartSkin.Rhino8.rhp") -Destination $OldDirectory
     Copy-Item -LiteralPath (Join-Path $PackageRoot "net48\SmartSkin.Core.dll") -Destination $OldDirectory
+    Copy-Item -LiteralPath (Join-Path $PackageRoot "net48\SmartSkin.Rhino8.rui") -Destination $OldDirectory
+    Set-Content -LiteralPath (Join-Path $OldDirectory "keep-other-toolbar.rui") -Value "unrelated toolbar" -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $OldDirectory "keep-user-file.txt") -Value "must survive" -Encoding ASCII
 
     New-Item -Path $RegistrySuiteRoot -Force | Out-Null
@@ -116,6 +118,42 @@ Set-Content -LiteralPath (Join-Path $PSScriptRoot "package-root.txt") -Value $Re
         throw "Installer left the old braced registry key behind."
     }
 
+    $InstalledRui = Join-Path $InstallRoot "current\SmartSkin.Rhino8.rui"
+    $PackageRui = Join-Path $PackageRoot "net48\SmartSkin.Rhino8.rui"
+    $ExpectedRuiHash = (Get-FileHash -LiteralPath $PackageRui -Algorithm SHA256).Hash
+    if ((Get-FileHash -LiteralPath $InstalledRui -Algorithm SHA256).Hash -ne $ExpectedRuiHash) {
+        throw "Installed RUI differs from the package."
+    }
+    if (Test-Path -LiteralPath (Join-Path $OldDirectory "SmartSkin.Rhino8.rui")) {
+        throw "Old registered Smart Skin RUI was not removed."
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $OldDirectory "keep-other-toolbar.rui"))) {
+        throw "Installer removed an unrelated toolbar."
+    }
+    & (Join-Path $PackageRoot "Test-Toolbar.ps1") -RuiPath $InstalledRui
+    $Info = Get-Content -LiteralPath (Join-Path $InstallRoot "current\install-info.json") -Raw | ConvertFrom-Json
+    if ($Info.toolbar_sha256 -ne $ExpectedRuiHash) { throw "Install metadata RUI hash mismatch." }
+
+    Write-Host "SMARTSKIN_INSTALLER_TEST PHASE | reject-missing-rui"
+    $Incomplete = Join-Path $TestRoot "incomplete-package"
+    New-Item -ItemType Directory -Path $Incomplete -Force | Out-Null
+    Copy-Item -Path (Join-Path $PackageRoot "*") -Destination $Incomplete -Recurse
+    Remove-Item -LiteralPath (Join-Path $Incomplete "net48\SmartSkin.Rhino8.rui")
+    $MissingRejected = $false
+    try {
+        & (Join-Path $Incomplete "Install-SmartSkin.ps1") `
+            -PackageRoot $Incomplete -InstallRoot $InstallRoot -RegistryBase $RegistryBase `
+            -SkipRhinoInstalledCheck -AllowTestInstallRoot
+    }
+    catch { $MissingRejected = $true }
+    if (-not $MissingRejected) { throw "Installer accepted a package with no RUI." }
+    if ((Get-FileHash -LiteralPath $InstalledRui -Algorithm SHA256).Hash -ne $ExpectedRuiHash) {
+        throw "Rejected package damaged the installed toolbar."
+    }
+    if ((Get-ItemProperty -LiteralPath $CanonicalRegistryKey -Name "FileName").FileName -ne $RegisteredPath) {
+        throw "Rejected package changed the registered plug-in path."
+    }
+
     Write-Host "SMARTSKIN_INSTALLER_TEST PHASE | repeat-update"
     & (Join-Path $PackageRoot "Install-SmartSkin.ps1") `
         -PackageRoot $PackageRoot `
@@ -132,6 +170,12 @@ Set-Content -LiteralPath (Join-Path $PSScriptRoot "package-root.txt") -Value $Re
         throw "Installer left an old managed version behind."
     }
 
+    $RuiCopies = @(Get-ChildItem -LiteralPath $InstallRoot -Filter "SmartSkin.Rhino8.rui" -Recurse -File)
+    if ($RuiCopies.Count -ne 1) { throw "Repeated update created duplicate installed RUI files." }
+    if ((Get-FileHash -LiteralPath $InstalledRui -Algorithm SHA256).Hash -ne $ExpectedRuiHash) {
+        throw "Repeated update changed the toolbar bytes."
+    }
+
     Write-Host "SMARTSKIN_INSTALLER_TEST PHASE | uninstall"
     & (Join-Path $PackageRoot "Uninstall-SmartSkin.ps1") `
         -InstallRoot $InstallRoot `
@@ -146,6 +190,10 @@ Set-Content -LiteralPath (Join-Path $PSScriptRoot "package-root.txt") -Value $Re
     }
     if (-not (Test-Path -LiteralPath (Join-Path $OldDirectory "keep-user-file.txt"))) {
         throw "Uninstaller removed an unrelated old-folder file."
+    }
+
+    if (-not (Test-Path -LiteralPath (Join-Path $OldDirectory "keep-other-toolbar.rui"))) {
+        throw "Uninstaller removed an unrelated toolbar."
     }
 
     Write-Host "SMARTSKIN_INSTALLER_TEST PASS"
