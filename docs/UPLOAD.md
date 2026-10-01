@@ -1,23 +1,36 @@
 # Publish a Smart Skin patch
 
-Do not use GitHub's browser upload for project patches. It is not the Smart Skin delivery path because it can omit directories and does not provide a reproducible base-to-target transition.
+GitHub is the only source of published code, workflows and build artifacts.
+Google Drive stores only the project journal. Do not deliver source ZIPs,
+publication kits or CI artifacts through Drive.
 
-## Supported route
+## Before publication
 
-Each repository patch is delivered as an immutable patch kit containing:
+1. Re-read the live `main` commit and require the expected base.
+2. Keep one architectural objective and increment the version.
+3. Verify the changed-file allowlist, `git diff --check`, version identity,
+   workflow syntax and the tests for the changed layer.
+4. For a UI-only patch, prove production C# files are byte-for-byte unchanged.
+5. Stop on a changed base, failed check or unexpected file.
 
-- the expected base commit;
-- the target commit or mail-formatted Git patch;
-- an installer that stops if the remote `main` commit is not the expected base;
-- a manifest and hashes;
-- the patch-specific verification instructions.
+## Publication
 
-Run the kit from Windows PowerShell or its `RUN_*.cmd` launcher. The installer clones the repository into a temporary diagnostic directory, verifies the base, applies the patch, checks required files, commits when needed, and pushes a fast-forward update to `main`.
+Publish one fast-forward commit to `main` through authenticated Git or the
+connected GitHub Git Data API. Preserve released history and stable identities.
+Never force-push, overwrite an old version, use GitHub's browser file editor or
+ask the user to publish a prepared archive.
 
-The only interactive step may be GitHub authentication through Git Credential Manager. Never paste a token into a project file or commit it.
+When the Git Data API is used, create blobs and one tree from the verified base,
+create the commit, then update `main` with `force=false`. Read back the live
+commit and its tree before treating publication as complete.
 
-## After push
+## After publication
 
-Open the repository's **Actions** tab and inspect the patch workflow. If it is green, download the versioned artifact and follow `FIELD_TEST.md` inside it.
+Wait for the patch workflow on the exact published commit. Require every
+expected step and the versioned artifact to succeed. Download and inspect the
+artifact identity before field testing.
 
-If installation or CI fails, return the complete `SMARTSKIN_* FAIL` output or the complete failing Actions step log. Do not make speculative edits in GitHub's browser editor.
+Install the green artifact through its normal managed installer, but do not
+turn installation into a separate user test. The user reports installation
+only if a real problem occurs. Run the focused Rhino test for the changed layer
+one case at a time and preserve its machine output in the project journal.

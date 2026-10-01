@@ -2,7 +2,7 @@
 
 Rhino 8 surface-assistance plug-in. The intended product is a small, dependable command that diagnoses irregular curve/edge frameworks, infers a likely surface strategy, builds candidates and returns a native Rhino result with an explanation.
 
-## Current state: P03F1 verified; P04 toolbar source checkpoint
+## Current state: P04 accepted; P04F1 four-command toolbar
 
 P00 proved the repository → CI → artifact → Rhino field-test loop and is `VERIFIED` in Rhino 8.18.
 
@@ -96,12 +96,18 @@ is unchanged. P03F1 is `VERIFIED` for runtime commit
 `ada5c269c9d270e44952fcc297b611236c4a4782`. Existing CI and Rhino field evidence
 are summarized in [`docs/P03F1_CLOSURE.md`](docs/P03F1_CLOSURE.md).
 
-P04 version `0.0.8-p04` adds one native `Smart Skin` toolbar and one button for
-`SmartSurfaceBuild`, through a same-name RUI beside the RHP. It adds no new
-runtime C# behavior. The RUI is included in build, package and managed lifecycle.
-P04 is a source checkpoint, **NOT VERIFIED in Windows CI or Rhino**. The planned
-publication kit is `SmartSkin-P04-v002`; it has not been delivered by this
-checkpoint. See [`docs/P04_TOOLBAR.md`](docs/P04_TOOLBAR.md).
+P04 version `0.0.8-p04` added one native `Smart Skin` toolbar and one button
+for `SmartSurfaceBuild`, through a same-name RUI beside the RHP. GitHub Actions
+run 13 passed for commit
+`a9e854dec93cde1a0e74d2596081d863803993ae`; Rhino 8.18 field evidence showed
+the visible toolbar invoking an accepted Loft with `objects=2->3`. The user
+accepted the toolbar and P04 is `VERIFIED` for that objective. See
+[`docs/P04_CLOSURE.md`](docs/P04_CLOSURE.md).
+
+P04F1 version `0.0.9-p04f1` keeps that toolbar and exposes all four existing
+commands as distinct buttons: Build, Plan, Preflight and Version. It adds no
+runtime command or solver and changes no production C# source. See
+[`docs/P04F1_TOOLBAR.md`](docs/P04F1_TOOLBAR.md).
 
 ## Projects
 
@@ -121,7 +127,7 @@ Requirements for a Windows developer machine:
 dotnet restore SmartSkin.sln
 dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=local
 dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --no-build
-.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.8-p04 -Commit local
+.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.9-p04f1 -Commit local
 ```
 
 GitHub Actions performs the same build on Windows and publishes a versioned ZIP for the Rhino test.
@@ -132,7 +138,11 @@ Repository upload instructions: [`docs/UPLOAD.md`](docs/UPLOAD.md).
 
 ## Test in Rhino
 
-Extract the artifact, close Rhino and run `INSTALL.cmd`, then follow [`docs/FIELD_TEST.md`](docs/FIELD_TEST.md). Do not manually register the `.rhp` from the extracted download folder. A green CI run is not equivalent to a Rhino field test.
+Extract the artifact, close Rhino and run `INSTALL.cmd` normally, then follow
+[`docs/FIELD_TEST.md`](docs/FIELD_TEST.md). Installation is not a separate
+field test; report it only if an actual problem occurs. Do not manually
+register the `.rhp` from the extracted download folder. A green CI run is not
+equivalent to the focused four-button Rhino check.
 
 ## Development sequence
 
@@ -142,7 +152,8 @@ Extract the artifact, close Rhino and run `INSTALL.cmd`, then follow [`docs/FIEL
 4. P02 — input topology classification and candidate routing without geometry mutation (`VERIFIED`).
 5. P03 — bounded PlanarSrf/EdgeSrf/Loft candidate preview and explicit one-Brep accept (`VERIFIED` construction behavior on commit `acdcba9cc0586a769bae7a97ed61dadf74055573`).
 6. P03F1 — exclude deleted Undo records from all document-count diagnostics (`VERIFIED` on commit `ada5c269c9d270e44952fcc297b611236c4a4782`).
-7. P04 — native one-button toolbar, version `0.0.8-p04` (source checkpoint; CI/Rhino `NOT VERIFIED`).
+7. P04 — native one-button Build toolbar, version `0.0.8-p04` (`VERIFIED` on commit `a9e854dec93cde1a0e74d2596081d863803993ae`).
+8. P04F1 — expand the accepted toolbar to all four existing commands, version `0.0.9-p04f1`.
 
 ## Data and licensing
 

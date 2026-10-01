@@ -1,5 +1,10 @@
 # P04 toolbar deployment contract
 
+P04 `0.0.8-p04` is accepted on runtime commit
+`a9e854dec93cde1a0e74d2596081d863803993ae`; see `P04_CLOSURE.md`.
+This file preserves the released one-button contract. The authorized
+four-command follow-up is defined separately in `P04F1_TOOLBAR.md`.
+
 ## Native loading, not a startup callback
 
 The RUI has the exact basename of the RHP and is copied into the same net48

@@ -37,10 +37,10 @@ try {
     $Bars = @($Rui.SelectNodes("tool_bars/tool_bar"))
     $Buttons = @($Rui.SelectNodes("tool_bars/tool_bar/tool_bar_item"))
     $Macros = @($Rui.SelectNodes("macros/macro_item"))
-    Require ($Groups.Count -eq 1 -and $Bars.Count -eq 1 -and $Buttons.Count -eq 1 -and $Macros.Count -eq 1) "Expected exactly one group, toolbar, button and macro."
-    Require (@($Rui.SelectNodes("menus/* | extend_rhino_menus/*")).Count -eq 0) "P04 must not extend Rhino menus."
+    Require ($Groups.Count -eq 1 -and $Bars.Count -eq 1 -and $Buttons.Count -eq 4 -and $Macros.Count -eq 4) "Expected one group, one toolbar, four buttons and four macros."
+    Require (@($Rui.SelectNodes("menus/* | extend_rhino_menus/*")).Count -eq 0) "Smart Skin must not extend Rhino menus."
 
-    $Group = $Groups[0]; $Bar = $Bars[0]; $Button = $Buttons[0]; $Macro = $Macros[0]
+    $Group = $Groups[0]; $Bar = $Bars[0]
     $Items = @($Group.SelectNodes("tool_bar_group_item"))
     Require ($Items.Count -eq 1) "Expected one group item."
     $Item = $Items[0]
@@ -48,8 +48,6 @@ try {
         group = @($Group, "ebed14d4-d943-5ac3-b2bc-74cfc7eaa798")
         group_item = @($Item, "c7770a71-565a-599e-8b5a-f78a36324ecd")
         toolbar = @($Bar, "c2cb82d9-8ff1-5230-865f-af924412192d")
-        button = @($Button, "e8384b80-33a1-5372-837d-b2605d097033")
-        macro = @($Macro, "388db0d8-f25d-5e76-849f-49b913de4229")
     }
     foreach ($Pair in $Identities.Values) {
         Require ($Pair[0].GetAttribute("guid") -eq $Pair[1]) "Stable toolbar component GUID mismatch."
@@ -57,17 +55,61 @@ try {
     Require ($Item.SelectSingleNode("tool_bar_id").InnerText -eq $Bar.GetAttribute("guid")) "Unresolved toolbar reference."
     Require ($Group.GetAttribute("active_tool_bar_group") -eq $Item.GetAttribute("guid")) "Unresolved active group item."
     Require ($Group.SelectSingleNode("dock_bar_info").GetAttribute("visible") -eq "True") "First-load toolbar must be visible."
-    Require ($Button.SelectSingleNode("left_macro_id").InnerText -eq $Macro.GetAttribute("guid")) "Unresolved button macro."
-    Require (@($Button.SelectNodes("right_macro_id")).Count -eq 0) "Right-click must not invoke a second action."
-    Require ($Macro.SelectSingleNode("script").InnerText -ceq "! _SmartSurfaceBuild") "Unexpected macro, selection reset, or automatic acceptance."
-    foreach ($Locale in @("locale_1033", "locale_1049")) {
-        $Tooltip = $Macro.SelectSingleNode("tooltip/" + $Locale)
-        Require ($null -ne $Tooltip -and -not [string]::IsNullOrWhiteSpace($Tooltip.InnerText)) "Missing localized tooltip."
+
+    $CommandSpecs = @(
+        [ordered]@{
+            name = "SmartSurfaceBuild"
+            script = "! _SmartSurfaceBuild"
+            button = "e8384b80-33a1-5372-837d-b2605d097033"
+            macro = "388db0d8-f25d-5e76-849f-49b913de4229"
+            bitmap = "ccb35d2d-9542-5366-8f54-dd3da8cfbae0"
+            index = 0
+        },
+        [ordered]@{
+            name = "SmartSurfacePlan"
+            script = "! _SmartSurfacePlan"
+            button = "52c7f8c8-7783-5e79-b6c1-385e907aa1bc"
+            macro = "aecb1052-7a96-58ec-8877-6b97e1689798"
+            bitmap = "5bb6fb4b-5e8d-555a-a744-d88d184ba8fd"
+            index = 1
+        },
+        [ordered]@{
+            name = "SmartSurfacePreflight"
+            script = "! _SmartSurfacePreflight"
+            button = "1aa9ca1d-ed61-5d9c-8903-907d1000b9e6"
+            macro = "8330b22b-75bf-5cfd-b251-a634072397e9"
+            bitmap = "2a674390-4cee-51f1-922b-742a1eaee03d"
+            index = 2
+        },
+        [ordered]@{
+            name = "SmartSurfaceVersion"
+            script = "! _SmartSurfaceVersion"
+            button = "d28fe1bd-2e7f-591f-a70f-0878a7ad4acc"
+            macro = "8671d92d-bb1f-5e8e-80b3-a60c34d1ddae"
+            bitmap = "63fb3907-aaba-55ad-882e-819bac4aba3d"
+            index = 3
+        }
+    )
+
+    for ($Index = 0; $Index -lt $CommandSpecs.Count; $Index++) {
+        $Spec = $CommandSpecs[$Index]
+        $Button = $Buttons[$Index]
+        Require ($Button.GetAttribute("guid") -eq $Spec.button) "Toolbar button order or identity changed for $($Spec.name)."
+        Require (@($Button.SelectNodes("right_macro_id")).Count -eq 0) "Right-click must not invoke a second action."
+
+        $Macro = $Rui.SelectSingleNode("macros/macro_item[@guid='" + $Spec.macro + "']")
+        Require ($null -ne $Macro) "Missing macro for $($Spec.name)."
+        Require ($Button.SelectSingleNode("left_macro_id").InnerText -eq $Spec.macro) "Unresolved button macro for $($Spec.name)."
+        Require ($Macro.SelectSingleNode("text/locale_1033").InnerText -ceq $Spec.name) "Unexpected macro name for $($Spec.name)."
+        Require ($Macro.SelectSingleNode("script").InnerText -ceq $Spec.script) "Unexpected script for $($Spec.name)."
+        Require ($Macro.GetAttribute("bitmap_id") -eq $Spec.bitmap) "Macro bitmap identity mismatch for $($Spec.name)."
+        foreach ($Locale in @("locale_1033", "locale_1049")) {
+            $Tooltip = $Macro.SelectSingleNode("tooltip/" + $Locale)
+            Require ($null -ne $Tooltip -and -not [string]::IsNullOrWhiteSpace($Tooltip.InnerText)) "Missing localized tooltip for $($Spec.name)."
+        }
     }
 
     Add-Type -AssemblyName System.Drawing
-    $BitmapGuid = "ccb35d2d-9542-5366-8f54-dd3da8cfbae0"
-    Require ($Macro.GetAttribute("bitmap_id") -eq $BitmapGuid) "Macro bitmap identity mismatch."
     $Sizes = @{ small_bitmap = 16; normal_bitmap = 24; large_bitmap = 32 }
     Require (@($Rui.SelectNodes("bitmaps/*")).Count -eq 3) "Expected three bitmap atlases."
     foreach ($Tag in $Sizes.Keys) {
@@ -76,8 +118,12 @@ try {
         Require ($null -ne $Atlas) "Missing bitmap atlas."
         Require ($Atlas.GetAttribute("item_width") -eq [string]$Size -and $Atlas.GetAttribute("item_height") -eq [string]$Size) "Unexpected bitmap cell size."
         $BitmapItems = @($Atlas.SelectNodes("bitmap_item"))
-        Require ($BitmapItems.Count -eq 1) "Expected one bitmap item per atlas."
-        Require ($BitmapItems[0].GetAttribute("guid") -eq $BitmapGuid -and $BitmapItems[0].GetAttribute("index") -eq "0") "Bitmap GUID or index mismatch."
+        Require ($BitmapItems.Count -eq 4) "Expected four bitmap items per atlas."
+        foreach ($Spec in $CommandSpecs) {
+            $BitmapItem = $Atlas.SelectSingleNode("bitmap_item[@guid='" + $Spec.bitmap + "']")
+            Require ($null -ne $BitmapItem) "Missing bitmap item for $($Spec.name)."
+            Require ($BitmapItem.GetAttribute("index") -eq [string]$Spec.index) "Bitmap index mismatch for $($Spec.name)."
+        }
         $Bytes = [Convert]::FromBase64String($Atlas.SelectSingleNode("bitmap").InnerText)
         Require ($Bytes.Length -ge 24) "Empty bitmap."
         $Magic = [BitConverter]::ToString($Bytes, 0, 8)
@@ -93,18 +139,31 @@ try {
         Require ([BitConverter]::ToString($Bytes, 20, 4) -eq [BitConverter]::ToString($ExpectedHeight)) "Unexpected PNG height header."
         $Stream = New-Object System.IO.MemoryStream
         $Image = $null
+        $DecodedBitmap = $null
         try {
             $Stream.Write($Bytes, 0, $Bytes.Length)
             $Stream.Position = 0
             $Image = [System.Drawing.Image]::FromStream($Stream, $true, $true)
             Require ($Image.Width -eq 250 * $Size -and $Image.Height -eq $Size) "Unexpected legacy 250-column atlas dimensions."
+            $DecodedBitmap = New-Object System.Drawing.Bitmap -ArgumentList $Image
+            foreach ($Spec in $CommandSpecs) {
+                $OpaquePixels = 0
+                $StartX = $Spec.index * $Size
+                for ($X = $StartX; $X -lt $StartX + $Size; $X++) {
+                    for ($Y = 0; $Y -lt $Size; $Y++) {
+                        if ($DecodedBitmap.GetPixel($X, $Y).A -gt 0) { $OpaquePixels++ }
+                    }
+                }
+                Require ($OpaquePixels -gt 0) "Bitmap cell is empty for $($Spec.name)."
+            }
         }
         finally {
+            if ($null -ne $DecodedBitmap) { $DecodedBitmap.Dispose() }
             if ($null -ne $Image) { $Image.Dispose() }
             $Stream.Dispose()
         }
     }
-    Write-Host "SMARTSKIN_TOOLBAR PASS | groups=1 | toolbars=1 | buttons=1 | macro=SmartSurfaceBuild | icons=16,24,32"
+    Write-Host "SMARTSKIN_TOOLBAR PASS | groups=1 | toolbars=1 | buttons=4 | macros=SmartSurfaceBuild,SmartSurfacePlan,SmartSurfacePreflight,SmartSurfaceVersion | icons=16,24,32"
 }
 catch {
     Write-Host "SMARTSKIN_TOOLBAR FAIL | error=$($_.Exception.Message)"

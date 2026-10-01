@@ -1,45 +1,47 @@
-# Smart Skin handoff - P04 source checkpoint
+# Smart Skin handoff - P04F1 four-command toolbar
 
-## Published baseline and local work
+## Verified baseline
 
-The verified runtime remains P03F1, version 0.0.6-p03f1, commit
-`ada5c269c9d270e44952fcc297b611236c4a4782`. See `P03F1_CLOSURE.md` for the existing
-CI/field evidence. Do not install a documentation-only rebuild or repeat its
-closed test suite just because a session changed.
+P03F1 remains the verified runtime geometry/counting baseline at
+`ada5c269c9d270e44952fcc297b611236c4a4782`.
 
-A separate documentation closure and P04 implementation are now local commits.
-P04 is 0.0.8-p04, one native toolbar and button, with all production C# unchanged.
-This source checkpoint is not the publication kit and contains no compiled P04.
-The interrupted 0.0.7-p04/v001 and its old SHA values are historical only.
+P04 `0.0.8-p04` is accepted in Rhino 8.18 at
+`a9e854dec93cde1a0e74d2596081d863803993ae`. GitHub Actions run 13 passed,
+the native Smart Skin toolbar was visible, and its Build button produced and
+accepted a Loft with `objects=2->3`. See `P04_CLOSURE.md`.
 
-## Source of truth and delivery
+## Current objective
+
+P04F1 `0.0.9-p04f1` expands that same accepted toolbar to all four existing
+commands: Build, Plan, Preflight and Version. This is one UI mapping patch.
+It adds no command, solver or panel.
+
+All production C# source must remain byte-for-byte identical to P04/P03F1.
+Only the RUI, its exact validator, version/identity expectations, packaging
+metadata, workflow labels, icon sources and release documentation may change.
+
+## Source of truth
 
 Repository: <https://github.com/1lmgc1/smart-skin>.
-The repository is authoritative for published source, workflows and artifacts.
-A versioned full-history bundle backs up unpushed checkpoint commits. The Drive
-journal stores decisions, exact checkpoint identity, location and status.
-No direct file-by-file connector push, browser editor, or force-push replaces
-the immutable kit route in UPLOAD.md.
+GitHub is authoritative for source, workflow results and artifacts. Google
+Drive stores only the project journal. Do not upload source ZIPs or CI artifacts
+to Drive and do not ask the user to publish a prepared patch.
 
-## Resume procedure
+## Completion path
 
-1. Read AGENTS, P03F1_CLOSURE, PATCH_NOTES, P04_TOOLBAR and FIELD_TEST.
-2. Restore the exact checkpoint bundle and check the base/closure/target SHA
-   against its manifest. Inspect remote main; do not assume it is unchanged.
-3. Perform queue P04.3: targeted diff/identity checks, PowerShell parsing and
-   execution tests, publish-script harness (base, already-applied, wrong base,
-   corrupted package). A Linux parse is not a Windows lifecycle execution.
-4. Complete P04.4: immutable SmartSkin-P04-v002 kit and durable, read-back-checked
-   copy. User runs RUN_P04.cmd only after that kit is explicitly delivered.
-5. Check green build-p04 for the exact target, download and verify its artifact.
-6. Managed install with Rhino closed, then focused GUI FIELD_TEST. Do not assign
-   VERIFIED to P04 until visibility, button behavior and UI lifecycle pass.
-7. Close P04 and sync repository/Drive documentation. No P05 before review.
+1. Verify one group, one toolbar, four ordered buttons, four exact macros,
+   localized tooltips and four non-empty bitmap cells at 16/24/32.
+2. Prove the production C# tree is unchanged from P04.
+3. Run parser/diff/version/YAML checks and the available targeted tests.
+4. Publish one fast-forward P04F1 commit to GitHub.
+5. Require green `build-p04f1`: 31/31 Core tests, toolbar validation, package
+   and installer lifecycle.
+6. Field-test only the changed mapping: Version, Preflight, Plan and Build
+   Cancel through the four buttons. Do not repeat installation diagnostics or
+   the closed P03/P03F1 geometry suite.
 
-## Current limitations
+## Safety
 
-No P04 Windows build or Rhino execution has occurred at this checkpoint.
-Native same-name RUI deployment was chosen from McNeel documentation. It avoids
-load-order tricks and shared settings edits, but a missed first-load toolbar or
-stale UI after uninstall must be diagnosed in the field rather than hidden by
-manual import or Rhino-wide reset.
+Preserve every released P04 UI GUID and the fixed plug-in GUID. Never reset
+Rhino layouts, manually import the RUI as a passing workaround, force-push,
+publish user evidence, or alter source geometry behavior.
