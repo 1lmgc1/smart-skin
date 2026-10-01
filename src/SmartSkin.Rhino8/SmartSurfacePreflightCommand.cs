@@ -16,7 +16,7 @@ public sealed class SmartSurfacePreflightCommand : Command
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
-        var objectCountBefore = doc.Objects.Count;
+        var objectCountBefore = RhinoDocumentMetrics.ActiveObjectCount(doc);
         var identity = BuildIdentity.FromAssembly(typeof(SmartSurfacePreflightCommand).Assembly);
 
         using var selection = new GetObject();
@@ -38,7 +38,7 @@ public sealed class SmartSurfacePreflightCommand : Command
 
         if (selection.ObjectCount > PreflightOptions.DefaultMaximumItems)
         {
-            var objectCountAfterLimit = doc.Objects.Count;
+            var objectCountAfterLimit = RhinoDocumentMetrics.ActiveObjectCount(doc);
             RhinoApp.WriteLine(
                 $"SMARTSKIN_{identity.Patch} FAIL"
                 + $" | version={identity.Version}"
@@ -90,7 +90,7 @@ public sealed class SmartSurfacePreflightCommand : Command
                 RhinoApp.WriteLine(line);
             }
 
-            var objectCountAfter = doc.Objects.Count;
+            var objectCountAfter = RhinoDocumentMetrics.ActiveObjectCount(doc);
             if (objectCountBefore != objectCountAfter)
             {
                 RhinoApp.WriteLine(
@@ -105,7 +105,7 @@ public sealed class SmartSurfacePreflightCommand : Command
         }
         catch (Exception exception)
         {
-            var objectCountAfterFailure = doc.Objects.Count;
+            var objectCountAfterFailure = RhinoDocumentMetrics.ActiveObjectCount(doc);
             RhinoApp.WriteLine(
                 $"SMARTSKIN_{identity.Patch} FAIL"
                 + " | code=P01_UNHANDLED"

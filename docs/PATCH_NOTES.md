@@ -1,97 +1,76 @@
-# P03 Bounded Candidate Preview and Accept — patch notes
+# P03F1 Active Document Count — patch notes
 
-Version: `0.0.5-p03`
+Version: `0.0.6-p03f1`
 
 ## Goal
 
-Turn the verified P02 primary route into one disposable native Rhino Brep,
-preview it without changing the document, and add exactly one object only after
-the user explicitly chooses `Accept`.
+Correct every Smart Skin document-count diagnostic so `objects=` means active,
+saved Rhino document objects rather than the size of Rhino's component table,
+which also retains deleted objects for Undo.
+
+## Field evidence that triggered the fix
+
+P03 commit `acdcba9cc0586a769bae7a97ed61dadf74055573` passed GitHub Actions run 11
+and the Rhino 8.18 construction protocol:
+
+- PlanarSrf preview, Accept, source retention, and Undo worked;
+- an unordered four-edge loop previewed and accepted one EdgeSrf;
+- Loft preview, Cancel, Accept, Undo, save, and restart worked;
+- an open chain blocked before preview and selection Esc cancelled safely;
+- every accepted candidate was one Brep and every source curve remained.
+
+After PlanarSrf Undo, only the source circle remained selectable, but
+`SmartSurfaceVersion` printed `objects=2`. Repeated EdgeSrf tests similarly
+reported increasing totals after successful Undo. The surface behavior was
+correct; the diagnostic used `RhinoDoc.Objects.Count`, whose contract includes
+deleted records retained for Undo.
+
+Official RhinoCommon API basis:
+
+- `ObjectTable.Count` returns all items, including deleted ones:
+  <https://mcneel.github.io/rhinocommon-api-docs/api/RhinoCommon/html/T_Rhino_DocObjects_Tables_ObjectTable.htm>.
+- `ObjectEnumeratorSettings.ActiveObjects` returns objects in the current model
+  that are saved in the file, while the deleted-object filter is separate:
+  <https://mcneel.github.io/rhinocommon-api-docs/api/RhinoCommon/html/T_Rhino_DocObjects_ObjectEnumeratorSettings.htm>.
 
 ## Included
 
-- Add `SmartSurfaceBuild` while retaining `SmartSurfaceVersion`,
-  `SmartSurfacePreflight`, and `SmartSurfacePlan`.
-- Re-run the existing snapshot, preflight, topology, and route pipeline before
-  every build.
-- Add a Rhino-independent construction policy with stable block codes.
-- Construct only these `READY` primary routes:
-  - `PlanarSrf`: exactly one closed curve proven planar;
-  - `EdgeSrf`: two to four open curves in a tolerance-closed loop;
-  - `Loft`: exactly two sections with matching open/closed state.
-- Duplicate every selected curve or Brep edge before ordering, reversing, or
-  passing it to a Rhino constructor.
-- Order and orient EdgeSrf curve copies around their endpoint loop.
-- Preserve Loft selection order and direction-align only the second copy.
-- Show one cyan shaded/wire preview through a temporary `DisplayConduit`.
-- Offer explicit `Accept` and `Cancel`; Esc follows the cancellation path.
-- Add the accepted candidate with `RhinoDoc.Objects.AddBrep`. The enclosing
-  Rhino command supplies the normal Rhino Undo record.
-- Emit machine-readable `ACCEPTED`, `CANCELLED`, or `BLOCKED` outcomes including
-  strategy, code, construction time, reversal count, and object counts.
+- Add one Rhino-adapter helper that enumerates active, saved document objects.
+- Include normal, locked, and hidden active objects.
+- Exclude deleted Undo records, instance-definition contents, reference
+  objects, grips, lights, and phantoms.
+- Use the same helper in `SmartSurfaceVersion`, `SmartSurfacePreflight`,
+  `SmartSurfacePlan`, and `SmartSurfaceBuild`.
+- Retain all P03 constructors, bounds, copy-only source handling, preview, and
+  explicit Accept/Cancel behavior without modification.
+- Update patch identity, packaging, installer metadata, CI names, and the
+  focused Rhino field protocol.
 
-## Construction bounds
+## Invariants
 
-| Bound | P03 value | Reason |
-|---|---:|---|
-| Accepted route state | `READY` only | Warnings and semantic ambiguity never enter construction. |
-| Curves | 4 maximum | Covers the admitted constructors without broad selection work. |
-| Combined curve spans | 64 maximum | Keeps the first native-construction slice deliberately small. |
-| Loft sections | exactly 2 | P03 does not infer section order for larger sets. |
-| Native result | exactly 1 Brep | Avoids an ambiguous multi-result commit. |
-| Result faces / edges | 64 / 256 maximum | Rejects unexpectedly complex output before preview. |
-
-The admitted Rhino methods are short synchronous native constructors on the
-supported Rhino command/UI thread. P03 does not claim a hard interrupt once a
-native call begins. Its hang-risk strategy is to exclude Patch/NetworkSrf and
-all repair/intersection searches, and to enforce the input bounds before the
-call. A later patch that admits expensive solvers must add a real cancellable
-API and timeout strategy.
-
-## Document invariants
-
-- Selection, snapshot extraction, routing, construction, and preview must leave
-  the document object count unchanged.
-- Source objects are never deleted, replaced, transformed, reversed, or edited.
+- A deleted or undone candidate does not contribute to `objects=`.
 - `Cancel`, Esc, blocked input, and handled native failure return
-  `objects=N->N`.
-- `Accept` is the only commit path and must return `objects=N->N+1`.
-- A successful Rhino `Undo` after Accept must return the document to N objects.
-- Preview is disabled in a `finally` block on every decision path.
+  `objects=N->N` using active object counts.
+- `Accept` returns `objects=N->N+1`.
+- `Undo` followed by `SmartSurfaceVersion` returns N.
+- No source geometry is deleted, replaced, transformed, reversed, or edited.
 
 ## Intentionally not included
 
-- `Patch`, `NetworkSrf`, Sweep, SubD, mesh wrapping, or multi-candidate ranking.
-- Three-or-more-section ordering or closed-section seam alignment.
-- Gap repair, snapping, rebuilding, trimming, joining, or source replacement.
-- Curvature, fairness, deviation, self-intersection, or G0/G1/G2 scoring.
-- Background execution or an unsafe attempt to call Rhino geometry APIs off the
-  command/UI thread.
-- Toolbar, panel, persistent options, or automatic command invocation.
-
-## Acceptance criteria
-
-- CI restore and Release build succeed with warnings treated as errors.
-- All Core tests pass, including the new construction-policy cases.
-- Packaging and the managed installer lifecycle pass for the exact P03 commit.
-- `SmartSurfaceVersion` reports `P03`, `0.0.5-p03`, and that commit.
-- Circle Accept produces one planar Brep and preserves the circle.
-- A scrambled selection of four exploded rectangle sides previews and accepts
-  one EdgeSrf Brep.
-- Two circles can be cancelled with no object change and accepted as one Loft.
-- An open chain blocks before preview and changes nothing.
-- Undo removes the accepted candidate while preserving all inputs.
-- Cancellation and command loading still work after a full Rhino restart.
+- No constructor, routing, topology, repair, or quality-ranking changes.
+- No toolbar or panel. The field test confirmed that command-line-only use is
+  inefficient; a minimal `SmartSurfaceBuild` toolbar is the next separate
+  product patch.
+- No change to the existing P03 machine codes such as `P03_ACCEPTED` and
+  `P03_ROUTE_NOT_READY`; only the build identity becomes `P03F1`.
 
 ## Verification status
 
-- `VERIFIED`: P02 field baseline commit
-  `450bf1e28b77abdb5e17ca6b06fa5c1564963a5b` and P02 closure commit
-  `aa3402bc922f74af7867fa799014447861c74304`.
-- `STATICALLY CHECKED`: P03 source architecture, bounds, mutation paths, machine
-  output, packaging metadata, and Core test cases after local review.
-- `NOT VERIFIED`: P03 compilation and Core tests until GitHub Actions runs on
-  the exact target commit (the current environment has no .NET SDK).
-- `NOT VERIFIED`: P03 package, managed update, viewport preview, native Rhino
-  constructors, Accept/Cancel/Undo, and restart behavior until the field test
-  in `docs/FIELD_TEST.md` passes.
+- `VERIFIED`: P03 construction behavior listed above on Rhino 8.18 commit
+  `acdcba9cc0586a769bae7a97ed61dadf74055573`.
+- `STATICALLY CHECKED`: P03F1 source replacement of all direct
+  `RhinoDoc.Objects.Count` diagnostics and consistency of version/package/docs.
+- `NOT VERIFIED`: P03F1 compilation, 31 Core tests, packaging, and installer
+  lifecycle until the exact target commit passes `build-p03f1`.
+- `NOT VERIFIED`: corrected active counts in Rhino until `docs/FIELD_TEST.md`
+  passes for the exact P03F1 artifact.

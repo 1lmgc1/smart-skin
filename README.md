@@ -2,7 +2,7 @@
 
 Rhino 8 surface-assistance plug-in. The intended product is a small, dependable command that diagnoses irregular curve/edge frameworks, infers a likely surface strategy, builds candidates and returns a native Rhino result with an explanation.
 
-## Current state: P03 implemented, field verification pending
+## Current state: P03 construction verified; P03F1 count correction pending
 
 P00 proved the repository → CI → artifact → Rhino field-test loop and is `VERIFIED` in Rhino 8.18.
 
@@ -27,7 +27,8 @@ P01 never creates or repairs geometry. The existing diagnostic command remains a
 SmartSurfaceVersion
 ```
 
-The diagnostic and preflight commands verify that the document object count is unchanged.
+The diagnostic and preflight commands verify that the active saved document
+object count is unchanged.
 
 P01F1 fixed a field-test regression in the Rhino adapter: selecting an entire
 `Extrusion` could be reported as the curve returned by `ObjRef.Curve()` instead
@@ -82,9 +83,17 @@ Brep while preserving every source object.
 
 P03 does not run `Patch` or `NetworkSrf`, sort more than two Loft sections,
 align closed-curve seams, repair source curves, trim, join, or score surface
-quality. Source-level policy tests and static checks may be completed before
-publication, but CI, packaging and Rhino behavior remain `NOT VERIFIED` until
-the exact P03 commit passes those environments.
+quality. Commit `acdcba9cc0586a769bae7a97ed61dadf74055573` passed GitHub Actions
+run 11 and Rhino 8.18 field tests for PlanarSrf, EdgeSrf, Loft, preview,
+Accept/Cancel, blocked input, Undo, save, and restart.
+
+The field test also exposed a diagnostic defect: `RhinoDoc.Objects.Count`
+includes deleted objects retained for Undo. Geometry and Undo behaved correctly,
+but later machine lines reported historical totals. P03F1 version
+`0.0.6-p03f1` replaces every direct table count with one active-object
+enumerator shared by Version, Preflight, Plan, and Build. Construction behavior
+is unchanged. P03F1 remains `NOT VERIFIED` until its exact CI artifact passes
+the focused Rhino count/Undo/restart test.
 
 ## Projects
 
@@ -104,7 +113,7 @@ Requirements for a Windows developer machine:
 dotnet restore SmartSkin.sln
 dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=local
 dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --no-build
-.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.5-p03 -Commit local
+.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.6-p03f1 -Commit local
 ```
 
 GitHub Actions performs the same build on Windows and publishes a versioned ZIP for the Rhino test.
@@ -123,7 +132,9 @@ Extract the artifact, close Rhino and run `INSTALL.cmd`, then follow [`docs/FIEL
 2. P01 — read-only GeometryReport/Preflight.
 3. P01F1 — preserve top-level versus sub-object selection identity (`VERIFIED`).
 4. P02 — input topology classification and candidate routing without geometry mutation (`VERIFIED`).
-5. P03 — bounded PlanarSrf/EdgeSrf/Loft candidate preview and explicit one-Brep accept (`NOT VERIFIED` in Rhino until the field protocol passes).
+5. P03 — bounded PlanarSrf/EdgeSrf/Loft candidate preview and explicit one-Brep accept (`VERIFIED` construction behavior on commit `acdcba9cc0586a769bae7a97ed61dadf74055573`).
+6. P03F1 — exclude deleted Undo records from all document-count diagnostics (`NOT VERIFIED` until focused CI and Rhino checks pass).
+7. Next — minimal Rhino toolbar with a primary `SmartSurfaceBuild` button.
 
 ## Data and licensing
 

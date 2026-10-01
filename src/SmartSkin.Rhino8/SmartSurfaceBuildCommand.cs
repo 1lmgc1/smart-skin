@@ -19,7 +19,7 @@ public sealed class SmartSurfaceBuildCommand : Command
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
-        var objectCountBefore = doc.Objects.Count;
+        var objectCountBefore = RhinoDocumentMetrics.ActiveObjectCount(doc);
         var identity = BuildIdentity.FromAssembly(typeof(SmartSurfaceBuildCommand).Assembly);
 
         using var selection = new GetObject();
@@ -41,7 +41,7 @@ public sealed class SmartSurfaceBuildCommand : Command
                 "P03_SELECTION_CANCELLED",
                 "NONE",
                 objectCountBefore,
-                doc.Objects.Count);
+                RhinoDocumentMetrics.ActiveObjectCount(doc));
             return selectionResult;
         }
 
@@ -53,7 +53,7 @@ public sealed class SmartSurfaceBuildCommand : Command
                 "P03_SELECTION_LIMIT",
                 "NONE",
                 objectCountBefore,
-                doc.Objects.Count,
+                RhinoDocumentMetrics.ActiveObjectCount(doc),
                 $" | selected={selection.ObjectCount.ToString(CultureInfo.InvariantCulture)}"
                 + $" | max={PreflightOptions.DefaultMaximumItems.ToString(CultureInfo.InvariantCulture)}");
             return Result.Success;
@@ -100,13 +100,14 @@ public sealed class SmartSurfaceBuildCommand : Command
                     construction.Code,
                     construction.StrategyToken,
                     objectCountBefore,
-                    doc.Objects.Count);
+                    RhinoDocumentMetrics.ActiveObjectCount(doc));
                 return Result.Success;
             }
 
-            if (doc.Objects.Count != objectCountBefore)
+            var objectCountBeforeBuild = RhinoDocumentMetrics.ActiveObjectCount(doc);
+            if (objectCountBeforeBuild != objectCountBefore)
             {
-                WriteFailureLine(identity, "P03_DOCUMENT_MUTATED_BEFORE_BUILD", objectCountBefore, doc.Objects.Count);
+                WriteFailureLine(identity, "P03_DOCUMENT_MUTATED_BEFORE_BUILD", objectCountBefore, objectCountBeforeBuild);
                 return Result.Failure;
             }
 
@@ -131,15 +132,16 @@ public sealed class SmartSurfaceBuildCommand : Command
                     outcome.Code,
                     construction.StrategyToken,
                     objectCountBefore,
-                    doc.Objects.Count,
+                    RhinoDocumentMetrics.ActiveObjectCount(doc),
                     $" | stage=BUILD"
                     + $" | elapsed_ms={outcome.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)}");
                 return Result.Success;
             }
 
-            if (doc.Objects.Count != objectCountBefore)
+            var objectCountBeforePreview = RhinoDocumentMetrics.ActiveObjectCount(doc);
+            if (objectCountBeforePreview != objectCountBefore)
             {
-                WriteFailureLine(identity, "P03_DOCUMENT_MUTATED_BEFORE_PREVIEW", objectCountBefore, doc.Objects.Count);
+                WriteFailureLine(identity, "P03_DOCUMENT_MUTATED_BEFORE_PREVIEW", objectCountBefore, objectCountBeforePreview);
                 return Result.Failure;
             }
 
@@ -152,7 +154,7 @@ public sealed class SmartSurfaceBuildCommand : Command
                     previewResult.Code,
                     construction.StrategyToken,
                     objectCountBefore,
-                    doc.Objects.Count,
+                    RhinoDocumentMetrics.ActiveObjectCount(doc),
                     $" | built=1"
                     + $" | added=0"
                     + $" | reversed={outcome.ReversedCurveCount.ToString(CultureInfo.InvariantCulture)}"
@@ -160,21 +162,22 @@ public sealed class SmartSurfaceBuildCommand : Command
                 return previewResult.CommandResult;
             }
 
-            if (doc.Objects.Count != objectCountBefore)
+            var objectCountAfterPreview = RhinoDocumentMetrics.ActiveObjectCount(doc);
+            if (objectCountAfterPreview != objectCountBefore)
             {
-                WriteFailureLine(identity, "P03_DOCUMENT_MUTATED_DURING_PREVIEW", objectCountBefore, doc.Objects.Count);
+                WriteFailureLine(identity, "P03_DOCUMENT_MUTATED_DURING_PREVIEW", objectCountBefore, objectCountAfterPreview);
                 return Result.Failure;
             }
 
             var addedId = doc.Objects.AddBrep(candidate);
             if (addedId == Guid.Empty)
             {
-                WriteFailureLine(identity, "P03_ADD_FAILED", objectCountBefore, doc.Objects.Count);
+                WriteFailureLine(identity, "P03_ADD_FAILED", objectCountBefore, RhinoDocumentMetrics.ActiveObjectCount(doc));
                 return Result.Failure;
             }
 
             doc.Views.Redraw();
-            var objectCountAfter = doc.Objects.Count;
+            var objectCountAfter = RhinoDocumentMetrics.ActiveObjectCount(doc);
             if (objectCountAfter != objectCountBefore + 1)
             {
                 WriteFailureLine(identity, "P03_ADD_COUNT_MISMATCH", objectCountBefore, objectCountAfter);
@@ -197,7 +200,7 @@ public sealed class SmartSurfaceBuildCommand : Command
         }
         catch (Exception exception)
         {
-            var objectCountAfterFailure = doc.Objects.Count;
+            var objectCountAfterFailure = RhinoDocumentMetrics.ActiveObjectCount(doc);
             RhinoApp.WriteLine(
                 $"SMARTSKIN_{identity.Patch} FAIL"
                 + $" | version={identity.Version}"

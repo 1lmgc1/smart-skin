@@ -12,7 +12,7 @@ public sealed class SmartSurfaceVersionCommand : Command
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
-        var objectCountBefore = doc.Objects.Count;
+        var objectCountBefore = RhinoDocumentMetrics.ActiveObjectCount(doc);
         var identity = BuildIdentity.FromAssembly(typeof(SmartSurfaceVersionCommand).Assembly);
 
         RhinoApp.WriteLine("Smart Skin diagnostic bootstrap");
@@ -24,7 +24,7 @@ public sealed class SmartSurfaceVersionCommand : Command
         RhinoApp.WriteLine($"Process: {(Environment.Is64BitProcess ? "x64" : "x86")}");
         RhinoApp.WriteLine("Mode: diagnostic-only; document geometry is not modified.");
 
-        var objectCountAfter = doc.Objects.Count;
+        var objectCountAfter = RhinoDocumentMetrics.ActiveObjectCount(doc);
         if (objectCountBefore != objectCountAfter)
         {
             RhinoApp.WriteLine($"SMARTSKIN_{identity.Patch} FAIL | objects={objectCountBefore}->{objectCountAfter}");
@@ -35,4 +35,3 @@ public sealed class SmartSurfaceVersionCommand : Command
         return Result.Success;
     }
 }
-
