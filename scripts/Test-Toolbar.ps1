@@ -37,7 +37,7 @@ try {
     $Bars = @($Rui.SelectNodes("tool_bars/tool_bar"))
     $Buttons = @($Rui.SelectNodes("tool_bars/tool_bar/tool_bar_item"))
     $Macros = @($Rui.SelectNodes("macros/macro_item"))
-    Require ($Groups.Count -eq 1 -and $Bars.Count -eq 1 -and $Buttons.Count -eq 4 -and $Macros.Count -eq 4) "Expected one group, one toolbar, four buttons and four macros."
+    Require ($Groups.Count -eq 1 -and $Bars.Count -eq 1 -and $Buttons.Count -eq 1 -and $Macros.Count -eq 4) "Expected one group, one toolbar, one product button and four preserved macros."
     Require (@($Rui.SelectNodes("menus/* | extend_rhino_menus/*")).Count -eq 0) "Smart Skin must not extend Rhino menus."
 
     $Group = $Groups[0]; $Bar = $Bars[0]
@@ -54,13 +54,13 @@ try {
     }
     Require ($Item.SelectSingleNode("tool_bar_id").InnerText -eq $Bar.GetAttribute("guid")) "Unresolved toolbar reference."
     Require ($Group.GetAttribute("active_tool_bar_group") -eq $Item.GetAttribute("guid")) "Unresolved active group item."
+    Require ($Item.GetAttribute("major_version") -eq "1" -and $Item.GetAttribute("minor_version") -eq "2") "Unexpected product toolbar revision."
     Require ($Group.SelectSingleNode("dock_bar_info").GetAttribute("visible") -eq "True") "First-load toolbar must be visible."
 
     $CommandSpecs = @(
         [ordered]@{
             name = "SmartSurfaceBuild"
             script = "! _SmartSurfaceBuild"
-            button = "e8384b80-33a1-5372-837d-b2605d097033"
             macro = "388db0d8-f25d-5e76-849f-49b913de4229"
             bitmap = "ccb35d2d-9542-5366-8f54-dd3da8cfbae0"
             index = 0
@@ -68,7 +68,6 @@ try {
         [ordered]@{
             name = "SmartSurfacePlan"
             script = "! _SmartSurfacePlan"
-            button = "52c7f8c8-7783-5e79-b6c1-385e907aa1bc"
             macro = "aecb1052-7a96-58ec-8877-6b97e1689798"
             bitmap = "5bb6fb4b-5e8d-555a-a744-d88d184ba8fd"
             index = 1
@@ -76,7 +75,6 @@ try {
         [ordered]@{
             name = "SmartSurfacePreflight"
             script = "! _SmartSurfacePreflight"
-            button = "1aa9ca1d-ed61-5d9c-8903-907d1000b9e6"
             macro = "8330b22b-75bf-5cfd-b251-a634072397e9"
             bitmap = "2a674390-4cee-51f1-922b-742a1eaee03d"
             index = 2
@@ -84,22 +82,21 @@ try {
         [ordered]@{
             name = "SmartSurfaceVersion"
             script = "! _SmartSurfaceVersion"
-            button = "d28fe1bd-2e7f-591f-a70f-0878a7ad4acc"
             macro = "8671d92d-bb1f-5e8e-80b3-a60c34d1ddae"
             bitmap = "63fb3907-aaba-55ad-882e-819bac4aba3d"
             index = 3
         }
     )
 
-    for ($Index = 0; $Index -lt $CommandSpecs.Count; $Index++) {
-        $Spec = $CommandSpecs[$Index]
-        $Button = $Buttons[$Index]
-        Require ($Button.GetAttribute("guid") -eq $Spec.button) "Toolbar button order or identity changed for $($Spec.name)."
-        Require (@($Button.SelectNodes("right_macro_id")).Count -eq 0) "Right-click must not invoke a second action."
+    $Button = $Buttons[0]
+    $BuildSpec = $CommandSpecs[0]
+    Require ($Button.GetAttribute("guid") -eq "e8384b80-33a1-5372-837d-b2605d097033") "Product button identity changed."
+    Require (@($Button.SelectNodes("right_macro_id")).Count -eq 0) "Right-click must not invoke a second toolbar action."
+    Require ($Button.SelectSingleNode("left_macro_id").InnerText -eq $BuildSpec.macro) "Product button must invoke SmartSurfaceBuild."
 
+    foreach ($Spec in $CommandSpecs) {
         $Macro = $Rui.SelectSingleNode("macros/macro_item[@guid='" + $Spec.macro + "']")
         Require ($null -ne $Macro) "Missing macro for $($Spec.name)."
-        Require ($Button.SelectSingleNode("left_macro_id").InnerText -eq $Spec.macro) "Unresolved button macro for $($Spec.name)."
         Require ($Macro.SelectSingleNode("text/locale_1033").InnerText -ceq $Spec.name) "Unexpected macro name for $($Spec.name)."
         Require ($Macro.SelectSingleNode("script").InnerText -ceq $Spec.script) "Unexpected script for $($Spec.name)."
         Require ($Macro.GetAttribute("bitmap_id") -eq $Spec.bitmap) "Macro bitmap identity mismatch for $($Spec.name)."
@@ -107,6 +104,18 @@ try {
             $Tooltip = $Macro.SelectSingleNode("tooltip/" + $Locale)
             Require ($null -ne $Tooltip -and -not [string]::IsNullOrWhiteSpace($Tooltip.InnerText)) "Missing localized tooltip for $($Spec.name)."
         }
+    }
+
+    $BuildMacro = $Rui.SelectSingleNode("macros/macro_item[@guid='" + $BuildSpec.macro + "']")
+    Require ($BuildMacro.SelectSingleNode("button_text/locale_1033").InnerText -ceq "Smart Skin") "Product button text must be Smart Skin."
+    Require ($BuildMacro.SelectSingleNode("button_text/locale_1049").InnerText -ceq "Smart Skin") "Localized product button text must be Smart Skin."
+    Require ($BuildMacro.SelectSingleNode("tooltip/locale_1033").InnerText -match "SmartSurfaceBuild") "Product tooltip must identify the invoked command."
+    $BuildHelp = $BuildMacro.SelectSingleNode("help_text/locale_1033").InnerText
+    Require ($BuildHelp -notmatch "\bAccept\b|\bCancel\b") "Product help must use normal Rhino confirmation, not extra Accept/Cancel options."
+
+    $VisibleMacroIds = @($Buttons | ForEach-Object { $_.SelectSingleNode("left_macro_id").InnerText })
+    foreach ($Spec in $CommandSpecs | Select-Object -Skip 1) {
+        Require ($VisibleMacroIds -notcontains $Spec.macro) "Diagnostic command $($Spec.name) must remain command-line only."
     }
 
     Add-Type -AssemblyName System.Drawing
@@ -163,7 +172,7 @@ try {
             $Stream.Dispose()
         }
     }
-    Write-Host "SMARTSKIN_TOOLBAR PASS | groups=1 | toolbars=1 | buttons=4 | macros=SmartSurfaceBuild,SmartSurfacePlan,SmartSurfacePreflight,SmartSurfaceVersion | icons=16,24,32"
+    Write-Host "SMARTSKIN_TOOLBAR PASS | groups=1 | toolbars=1 | buttons=1 | product=SmartSkin | diagnostics=command-line | icons=16,24,32"
 }
 catch {
     Write-Host "SMARTSKIN_TOOLBAR FAIL | error=$($_.Exception.Message)"

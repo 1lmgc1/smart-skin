@@ -37,7 +37,8 @@ internal sealed class CandidateBuildOutcome : IDisposable
         long elapsedMilliseconds,
         int supportedEdgeCount,
         int parentObjectCount,
-        double pointSpacing)
+        double pointSpacing,
+        CandidateBuildSettings settings)
     {
         Success = success;
         Code = code;
@@ -48,6 +49,7 @@ internal sealed class CandidateBuildOutcome : IDisposable
         SupportedEdgeCount = supportedEdgeCount;
         ParentObjectCount = parentObjectCount;
         PointSpacing = pointSpacing;
+        Settings = settings;
     }
 
     public bool Success { get; }
@@ -68,6 +70,8 @@ internal sealed class CandidateBuildOutcome : IDisposable
 
     public double PointSpacing { get; }
 
+    public CandidateBuildSettings Settings { get; }
+
     public static CandidateBuildOutcome Succeeded(
         Brep candidate,
         int reversedCurveCount,
@@ -75,6 +79,7 @@ internal sealed class CandidateBuildOutcome : IDisposable
         int supportedEdgeCount = 0,
         int parentObjectCount = 0,
         double pointSpacing = 0.0,
+        CandidateBuildSettings? settings = null,
         string? message = null)
     {
         return new CandidateBuildOutcome(
@@ -86,7 +91,8 @@ internal sealed class CandidateBuildOutcome : IDisposable
             elapsedMilliseconds,
             supportedEdgeCount,
             parentObjectCount,
-            pointSpacing);
+            pointSpacing,
+            settings ?? CandidateBuildSettings.Balanced);
     }
 
     public static CandidateBuildOutcome Failed(
@@ -96,7 +102,8 @@ internal sealed class CandidateBuildOutcome : IDisposable
         long elapsedMilliseconds,
         int supportedEdgeCount = 0,
         int parentObjectCount = 0,
-        double pointSpacing = 0.0)
+        double pointSpacing = 0.0,
+        CandidateBuildSettings? settings = null)
     {
         return new CandidateBuildOutcome(
             false,
@@ -107,7 +114,8 @@ internal sealed class CandidateBuildOutcome : IDisposable
             elapsedMilliseconds,
             supportedEdgeCount,
             parentObjectCount,
-            pointSpacing);
+            pointSpacing,
+            settings ?? CandidateBuildSettings.Balanced);
     }
 
     public void Dispose()
@@ -124,7 +132,8 @@ internal sealed class RhinoCandidateBuilder
     public CandidateBuildOutcome Build(
         CandidateConstructionPlan plan,
         IReadOnlyList<ObjRef> references,
-        double absoluteTolerance)
+        double absoluteTolerance,
+        CandidateBuildSettings? settings = null)
     {
         if (plan is null)
         {
@@ -141,6 +150,7 @@ internal sealed class RhinoCandidateBuilder
             throw new ArgumentException("The construction plan must be READY.", nameof(plan));
         }
 
+        var effectiveSettings = settings ?? CandidateBuildSettings.Balanced;
         var stopwatch = Stopwatch.StartNew();
         var duplicates = new List<Curve>(references.Count);
         var reversedCurveCount = 0;
@@ -254,6 +264,7 @@ internal sealed class RhinoCandidateBuilder
                     candidate = BuildTangentBoundaryPatch(
                         references,
                         absoluteTolerance,
+                        effectiveSettings,
                         out supportedEdgeCount,
                         out parentObjectCount,
                         out pointSpacing,
@@ -268,7 +279,8 @@ internal sealed class RhinoCandidateBuilder
                             stopwatch.ElapsedMilliseconds,
                             supportedEdgeCount,
                             parentObjectCount,
-                            pointSpacing);
+                            pointSpacing,
+                            effectiveSettings);
                     }
 
                     break;
@@ -293,7 +305,8 @@ internal sealed class RhinoCandidateBuilder
                     CandidateBuildCodes.InvalidCandidate,
                     "Rhino returned a candidate that is invalid or has no faces.",
                     reversedCurveCount,
-                    stopwatch.ElapsedMilliseconds);
+                    stopwatch.ElapsedMilliseconds,
+                    settings: effectiveSettings);
             }
 
             if (candidate.Faces.Count > MaximumResultFaces || candidate.Edges.Count > MaximumResultEdges)
@@ -303,7 +316,8 @@ internal sealed class RhinoCandidateBuilder
                     CandidateBuildCodes.ResultLimit,
                     $"Candidate faces/edges exceed P03 result limits {MaximumResultFaces}/{MaximumResultEdges}.",
                     reversedCurveCount,
-                    stopwatch.ElapsedMilliseconds);
+                    stopwatch.ElapsedMilliseconds,
+                    settings: effectiveSettings);
             }
 
             stopwatch.Stop();
@@ -314,8 +328,9 @@ internal sealed class RhinoCandidateBuilder
                 supportedEdgeCount,
                 parentObjectCount,
                 pointSpacing,
+                effectiveSettings,
                 plan.UsesBoundaryTangency
-                    ? $"One valid disposable tangent Patch was built from {supportedEdgeCount.ToString(CultureInfo.InvariantCulture)} owning Brep trims."
+                    ? $"One valid disposable contextual Patch was built from {supportedEdgeCount.ToString(CultureInfo.InvariantCulture)} owning Brep trims."
                     : null);
         }
         catch (Exception exception)
@@ -326,7 +341,8 @@ internal sealed class RhinoCandidateBuilder
                 CandidateBuildCodes.NativeException,
                 $"Native candidate construction raised {exception.GetType().Name}.",
                 reversedCurveCount,
-                stopwatch.ElapsedMilliseconds);
+                stopwatch.ElapsedMilliseconds,
+                settings: effectiveSettings);
         }
         finally
         {
@@ -362,6 +378,7 @@ internal sealed class RhinoCandidateBuilder
     private static Brep? BuildTangentBoundaryPatch(
         IReadOnlyList<ObjRef> references,
         double absoluteTolerance,
+        CandidateBuildSettings settings,
         out int supportedEdgeCount,
         out int parentObjectCount,
         out double pointSpacing,
@@ -436,17 +453,18 @@ internal sealed class RhinoCandidateBuilder
             return null;
         }
 
-        pointSpacing = Math.Max(absoluteTolerance * 10.0, totalBoundaryLength / 160.0);
+        var automaticPointSpacing = Math.Max(absoluteTolerance * 10.0, totalBoundaryLength / 160.0);
+        pointSpacing = automaticPointSpacing * settings.SampleSpacingScale;
         var fixedStartingEdges = new[] { false, false, false, false };
         return Brep.CreatePatch(
             constraints,
             startingSurface: null,
-            uSpans: 8,
-            vSpans: 8,
-            trim: true,
-            tangency: true,
+            uSpans: settings.USpans,
+            vSpans: settings.VSpans,
+            trim: settings.AutomaticTrim,
+            tangency: settings.AdjustTangency,
             pointSpacing: pointSpacing,
-            flexibility: 1.0,
+            flexibility: settings.Flexibility,
             surfacePull: 0.0,
             fixEdges: fixedStartingEdges,
             tolerance: absoluteTolerance);

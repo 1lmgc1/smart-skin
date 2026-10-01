@@ -23,7 +23,7 @@ public sealed class SmartSurfaceBuildCommand : Command
         var identity = BuildIdentity.FromAssembly(typeof(SmartSurfaceBuildCommand).Assembly);
 
         using var selection = new GetObject();
-        selection.SetCommandPrompt("Select curves or Brep edges for one Smart Skin candidate");
+        selection.SetCommandPrompt("Select boundary curves or Brep edges for Smart Skin; press Enter when done");
         selection.GeometryFilter = ObjectType.Curve
             | ObjectType.Surface
             | ObjectType.Brep
@@ -111,10 +111,14 @@ public sealed class SmartSurfaceBuildCommand : Command
                 return Result.Failure;
             }
 
-            using var outcome = new RhinoCandidateBuilder().Build(
+            var initialSettings = CandidateBuildSettings.Balanced;
+            using var previewSession = new SmartSkinLivePreviewSession(
+                doc,
                 construction,
                 references,
-                doc.ModelAbsoluteTolerance);
+                doc.ModelAbsoluteTolerance,
+                initialSettings);
+            var outcome = previewSession.Rebuild(initialSettings);
 
             RhinoApp.WriteLine(
                 $"Candidate build: {(outcome.Success ? "READY" : "BLOCKED")}"
@@ -124,8 +128,8 @@ public sealed class SmartSurfaceBuildCommand : Command
                 + BoundaryBuildDetails(construction, outcome, separator: ";")
                 + $"; {outcome.Message}");
 
-            var candidate = outcome.Candidate;
-            if (!outcome.Success || candidate is null)
+            if ((!outcome.Success || previewSession.Candidate is null)
+                && construction.Strategy != SurfaceStrategy.Patch)
             {
                 WriteSafeActionLine(
                     identity,
@@ -147,7 +151,8 @@ public sealed class SmartSurfaceBuildCommand : Command
                 return Result.Failure;
             }
 
-            var previewResult = GetPreviewDecision(doc, candidate);
+            var previewResult = GetPreviewDecision(doc, construction, previewSession);
+            var finalOutcome = previewSession.CurrentOutcome ?? outcome;
             if (!previewResult.Accepted)
             {
                 WriteSafeActionLine(
@@ -157,11 +162,11 @@ public sealed class SmartSurfaceBuildCommand : Command
                     construction.StrategyToken,
                     objectCountBefore,
                     RhinoDocumentMetrics.ActiveObjectCount(doc),
-                    $" | built=1"
+                    $" | built={(finalOutcome.Success ? "1" : "0")}"
                     + $" | added=0"
-                    + BoundaryBuildDetails(construction, outcome, separator: " |")
-                    + $" | reversed={outcome.ReversedCurveCount.ToString(CultureInfo.InvariantCulture)}"
-                    + $" | elapsed_ms={outcome.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)}");
+                    + BoundaryBuildDetails(construction, finalOutcome, separator: " |")
+                    + $" | reversed={finalOutcome.ReversedCurveCount.ToString(CultureInfo.InvariantCulture)}"
+                    + $" | elapsed_ms={finalOutcome.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)}");
                 return previewResult.CommandResult;
             }
 
@@ -169,6 +174,13 @@ public sealed class SmartSurfaceBuildCommand : Command
             if (objectCountAfterPreview != objectCountBefore)
             {
                 WriteFailureLine(identity, "P03_DOCUMENT_MUTATED_DURING_PREVIEW", objectCountBefore, objectCountAfterPreview);
+                return Result.Failure;
+            }
+
+            var candidate = previewSession.Candidate;
+            if (candidate is null || !finalOutcome.Success)
+            {
+                WriteFailureLine(identity, "P06_ACCEPT_WITHOUT_CANDIDATE", objectCountBefore, objectCountAfterPreview);
                 return Result.Failure;
             }
 
@@ -193,12 +205,12 @@ public sealed class SmartSurfaceBuildCommand : Command
                 + $" | commit={identity.Commit}"
                 + $" | strategy={construction.StrategyToken}"
                 + " | action=ACCEPTED"
-                + " | code=P03_ACCEPTED"
+                + " | code=P06_ACCEPTED"
                 + " | built=1"
                 + " | added=1"
-                + BoundaryBuildDetails(construction, outcome, separator: " |")
-                + $" | reversed={outcome.ReversedCurveCount.ToString(CultureInfo.InvariantCulture)}"
-                + $" | elapsed_ms={outcome.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)}"
+                + BoundaryBuildDetails(construction, finalOutcome, separator: " |")
+                + $" | reversed={finalOutcome.ReversedCurveCount.ToString(CultureInfo.InvariantCulture)}"
+                + $" | elapsed_ms={finalOutcome.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)}"
                 + $" | objects={objectCountBefore.ToString(CultureInfo.InvariantCulture)}->{objectCountAfter.ToString(CultureInfo.InvariantCulture)}");
             return Result.Success;
         }
@@ -216,34 +228,69 @@ public sealed class SmartSurfaceBuildCommand : Command
         }
     }
 
-    private static PreviewDecision GetPreviewDecision(RhinoDoc doc, Rhino.Geometry.Brep candidate)
+    private static PreviewDecision GetPreviewDecision(
+        RhinoDoc doc,
+        CandidateConstructionPlan construction,
+        SmartSkinLivePreviewSession previewSession)
     {
-        var conduit = new CandidatePreviewConduit(candidate);
-        conduit.Enabled = true;
-        doc.Views.Redraw();
+        using var form = new SmartSkinPreviewForm(doc, construction, previewSession);
+        form.Show();
 
         try
         {
             using var decision = new GetOption();
-            decision.SetCommandPrompt("Preview candidate. Press Enter, Space, or right-click to add; press Esc to cancel");
+            decision.SetCommandPrompt("Smart Skin preview: adjust the settings window; Enter, Space, or right-click adds; Esc cancels");
             decision.AcceptNothing(true);
-            var getResult = decision.Get();
+            decision.SetWaitDuration(100);
 
-            if (getResult == GetResult.Nothing)
+            while (true)
             {
-                return new PreviewDecision(true, Result.Success, "P03_ACCEPTED");
-            }
+                if (form.AcceptRequested)
+                {
+                    return new PreviewDecision(true, Result.Success, "P06_ACCEPTED");
+                }
 
-            var commandResult = decision.CommandResult();
-            return new PreviewDecision(
-                false,
-                commandResult == Result.Success ? Result.Cancel : commandResult,
-                "P03_PREVIEW_CANCELLED");
+                if (form.CancelRequested || !form.Visible)
+                {
+                    return new PreviewDecision(false, Result.Cancel, "P06_PREVIEW_CANCELLED");
+                }
+
+                var getResult = decision.Get();
+                if (form.AcceptRequested)
+                {
+                    return new PreviewDecision(true, Result.Success, "P06_ACCEPTED");
+                }
+
+                if (form.CancelRequested || !form.Visible)
+                {
+                    return new PreviewDecision(false, Result.Cancel, "P06_PREVIEW_CANCELLED");
+                }
+
+                if (getResult == GetResult.Timeout)
+                {
+                    continue;
+                }
+
+                if (getResult == GetResult.Nothing)
+                {
+                    if (form.PrepareForAcceptance())
+                    {
+                        return new PreviewDecision(true, Result.Success, "P06_ACCEPTED");
+                    }
+
+                    continue;
+                }
+
+                var commandResult = decision.CommandResult();
+                return new PreviewDecision(
+                    false,
+                    commandResult == Result.Success ? Result.Cancel : commandResult,
+                    "P06_PREVIEW_CANCELLED");
+            }
         }
         finally
         {
-            conduit.Enabled = false;
-            doc.Views.Redraw();
+            form.CloseForCommand();
         }
     }
 
@@ -257,9 +304,16 @@ public sealed class SmartSurfaceBuildCommand : Command
             return string.Empty;
         }
 
+        var settings = outcome.Settings;
         return $"{separator} supports={outcome.SupportedEdgeCount.ToString(CultureInfo.InvariantCulture)}"
             + $"{separator} parents={outcome.ParentObjectCount.ToString(CultureInfo.InvariantCulture)}"
-            + $"{separator} continuity=G1_REQUESTED"
+            + $"{separator} preset={settings.PresetToken}"
+            + $"{separator} u_spans={settings.USpans.ToString(CultureInfo.InvariantCulture)}"
+            + $"{separator} v_spans={settings.VSpans.ToString(CultureInfo.InvariantCulture)}"
+            + $"{separator} sample_spacing_scale={settings.SampleSpacingScale.ToString("G4", CultureInfo.InvariantCulture)}"
+            + $"{separator} flexibility={settings.Flexibility.ToString("G4", CultureInfo.InvariantCulture)}"
+            + $"{separator} continuity={(settings.AdjustTangency ? "G1_REQUESTED" : "G0_ONLY")}"
+            + $"{separator} trim={(settings.AutomaticTrim ? "ON" : "OFF")}"
             + $"{separator} point_spacing={outcome.PointSpacing.ToString("G6", CultureInfo.InvariantCulture)}";
     }
 
@@ -275,7 +329,7 @@ public sealed class SmartSurfaceBuildCommand : Command
         RhinoApp.WriteLine($"Version: {identity.Version}");
         RhinoApp.WriteLine($"Commit: {identity.Commit}");
         RhinoApp.WriteLine($"Units: {doc.ModelUnitSystem}");
-        RhinoApp.WriteLine("Mode: one in-memory preview; source geometry is unchanged; only Enter/Space/right-click adds one Brep; Esc cancels.");
+        RhinoApp.WriteLine("Mode: one live settings window and one in-memory preview; source geometry is unchanged; Enter/Space/right-click adds one Brep; Esc cancels.");
         RhinoApp.WriteLine(
             $"Preflight: {preflight.Status.ToString().ToUpperInvariant()}"
             + $"; warnings={preflight.WarningCount.ToString(CultureInfo.InvariantCulture)}"

@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Preflight and the P02 topology classifier/router are read-only. P03 may build one bounded disposable PlanarSrf, EdgeSrf or two-section Loft candidate from copies, preview it, and add exactly one Brep only after explicit confirmation. P03F1 changes only document-count diagnostics so deleted Undo records are excluded. P04 adds a native same-name RUI and its delivery lifecycle. P04F1 expands that accepted toolbar from the Build button to the four existing commands. P05 adds one contextual tangent Patch route for a strict closed loop of five to eight naked Brep edges. It must never repair, replace or transform source geometry.
+Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Preflight and the P02 topology classifier/router are read-only. P03 may build one bounded disposable PlanarSrf, EdgeSrf or two-section Loft candidate from copies, preview it, and add exactly one Brep only after explicit confirmation. P03F1 changes only document-count diagnostics so deleted Undo records are excluded. P04 adds a native same-name RUI and its delivery lifecycle. P04F1 expands that accepted toolbar from the Build button to the four existing commands. P05 adds one contextual tangent Patch route for a strict closed loop of five to eight naked Brep edges. P06 replaces the temporary command piano with one Smart Skin product button and one live settings window for the existing bounded result. It must never repair, replace or transform source geometry.
 
 ## Patch discipline
 
@@ -13,7 +13,8 @@ Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Pre
 - Never overwrite a released bundle; increment the version.
 - P04 was released as `0.0.8-p04` at `a9e854dec93cde1a0e74d2596081d863803993ae`; do not impersonate the interrupted `0.0.7-p04`/v001 draft or use a Drive kit as the publication channel.
 - P04F1 is version `0.0.9-p04f1`: one existing Smart Skin toolbar with buttons for Build, Plan, Preflight and Version. Preserve every P04 GUID and add stable GUIDs for new controls.
-- P05 is version `0.0.10-p05`: one contextual tangent Patch candidate from five to eight selected naked Brep edges. Preserve all P04F1 toolbar identities and every earlier bounded route.
+- P05 is version `0.0.10-p05`: one contextual tangent Patch candidate from five to eight selected naked Brep edges. That release preserves all P04F1 toolbar identities and every earlier bounded route.
+- P06 is version `0.0.11-p06`: one visible Smart Skin button, one modeless live-result window, and Rhino-native Enter/Space/right-click confirmation. Retire the three diagnostic button nodes without reusing their GUIDs; preserve their command, macro and bitmap identities. Keep Plan, Preflight and Version available only as command-line diagnostics. Do not add visible Accept/Cancel controls.
 - Preserve fixed plug-in and UI GUIDs. Never reset Rhino layouts or delete shared UI settings to repair a toolbar.
 
 ## Safety invariants
@@ -37,5 +38,5 @@ Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Pre
 dotnet restore SmartSkin.sln
 dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=local
 dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --no-build
-.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.10-p05 -Commit local
+.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.11-p06 -Commit local
 ```

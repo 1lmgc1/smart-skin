@@ -7,7 +7,7 @@
       <text>
         <locale_1033>Smart Skin</locale_1033>
       </text>
-      <tool_bar_group_item guid="c7770a71-565a-599e-8b5a-f78a36324ecd" major_version="1" minor_version="1">
+      <tool_bar_group_item guid="c7770a71-565a-599e-8b5a-f78a36324ecd" major_version="1" minor_version="2">
         <text>
           <locale_1033>Smart Skin</locale_1033>
         </text>
@@ -24,15 +24,6 @@
       <tool_bar_item guid="e8384b80-33a1-5372-837d-b2605d097033">
         <left_macro_id>388db0d8-f25d-5e76-849f-49b913de4229</left_macro_id>
       </tool_bar_item>
-      <tool_bar_item guid="52c7f8c8-7783-5e79-b6c1-385e907aa1bc">
-        <left_macro_id>aecb1052-7a96-58ec-8877-6b97e1689798</left_macro_id>
-      </tool_bar_item>
-      <tool_bar_item guid="1aa9ca1d-ed61-5d9c-8903-907d1000b9e6">
-        <left_macro_id>8330b22b-75bf-5cfd-b251-a634072397e9</left_macro_id>
-      </tool_bar_item>
-      <tool_bar_item guid="d28fe1bd-2e7f-591f-a70f-0878a7ad4acc">
-        <left_macro_id>8671d92d-bb1f-5e8e-80b3-a60c34d1ddae</left_macro_id>
-      </tool_bar_item>
     </tool_bar>
   </tool_bars>
   <macros>
@@ -41,19 +32,19 @@
         <locale_1033>SmartSurfaceBuild</locale_1033>
       </text>
       <tooltip>
-        <locale_1033>Build one surface candidate with preview</locale_1033>
-        <locale_1049>Построить поверхность с предпросмотром</locale_1049>
+        <locale_1033>SmartSurfaceBuild — Smart Skin settings and live preview</locale_1033>
+        <locale_1049>SmartSurfaceBuild — настройки Smart Skin и живой предпросмотр</locale_1049>
       </tooltip>
       <help_text>
-        <locale_1033>Select curves or edges, then Accept or Cancel the preview.</locale_1033>
-        <locale_1049>Выберите кривые или рёбра, затем Accept или Cancel.</locale_1049>
+        <locale_1033>Select curves or boundary edges, tune the live result, then confirm with Enter, Space or right-click; Esc cancels.</locale_1033>
+        <locale_1049>Выберите кривые или граничные рёбра, настройте результат и подтвердите Enter, пробелом или ПКМ; Esc отменяет.</locale_1049>
       </help_text>
       <button_text>
-        <locale_1033>Build</locale_1033>
-        <locale_1049>Построить</locale_1049>
+        <locale_1033>Smart Skin</locale_1033>
+        <locale_1049>Smart Skin</locale_1049>
       </button_text>
       <menu_text>
-        <locale_1033>Smart Skin - Build</locale_1033>
+        <locale_1033>Smart Skin</locale_1033>
       </menu_text>
       <script>! _SmartSurfaceBuild</script>
     </macro_item>

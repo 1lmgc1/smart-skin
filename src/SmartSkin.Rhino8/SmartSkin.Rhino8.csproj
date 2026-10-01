@@ -4,7 +4,7 @@
     <RootNamespace>SmartSkin.Rhino8</RootNamespace>
     <AssemblyName>SmartSkin.Rhino8</AssemblyName>
     <AssemblyTitle>Smart Skin</AssemblyTitle>
-    <Description>Bounded geometry preflight, contextual surface routing, and explicit native candidate preview for the Smart Skin Rhino 8 plug-in.</Description>
+    <Description>Bounded geometry routing, live result settings, and native surface preview for the Smart Skin Rhino 8 plug-in.</Description>
     <TargetExt>.rhp</TargetExt>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
