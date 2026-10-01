@@ -2,7 +2,7 @@
 
 Rhino 8 surface-assistance plug-in. The intended product is a small, dependable command that diagnoses irregular curve/edge frameworks, infers a likely surface strategy, builds candidates and returns a native Rhino result with an explanation.
 
-## Current state: P02 verified
+## Current state: P03 implemented, field verification pending
 
 P00 proved the repository → CI → artifact → Rhino field-test loop and is `VERIFIED` in Rhino 8.18.
 
@@ -64,6 +64,28 @@ the `PlanarSrf`, `EdgeSrf`, `Loft` and blocked open-chain routes, cancellation
 without mutation and the same section route after a full Rhino restart. P02 is
 `VERIFIED`.
 
+P03 adds the first geometry-producing command:
+
+```text
+SmartSurfaceBuild
+```
+
+It reuses the verified preflight and routing path, then admits only three
+bounded routes: one planar closed curve for `PlanarSrf`, two to four open
+curves forming a closed loop for `EdgeSrf`, or exactly two matching open/open
+or closed/closed sections for `Loft`. Construction is capped at four curves
+and 64 combined spans. A single Brep candidate is built from curve copies and
+shown through a temporary viewport conduit. The document changes only when the
+user explicitly chooses `Accept`; `Cancel`, Esc, a blocked route, or a native
+construction failure leaves `objects=N->N`. Accept adds exactly one native
+Brep while preserving every source object.
+
+P03 does not run `Patch` or `NetworkSrf`, sort more than two Loft sections,
+align closed-curve seams, repair source curves, trim, join, or score surface
+quality. Source-level policy tests and static checks may be completed before
+publication, but CI, packaging and Rhino behavior remain `NOT VERIFIED` until
+the exact P03 commit passes those environments.
+
 ## Projects
 
 - `src/SmartSkin.Core` — Rhino-independent code.
@@ -82,7 +104,7 @@ Requirements for a Windows developer machine:
 dotnet restore SmartSkin.sln
 dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=local
 dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --no-build
-.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.4-p02 -Commit local
+.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.5-p03 -Commit local
 ```
 
 GitHub Actions performs the same build on Windows and publishes a versioned ZIP for the Rhino test.
@@ -101,7 +123,7 @@ Extract the artifact, close Rhino and run `INSTALL.cmd`, then follow [`docs/FIEL
 2. P01 — read-only GeometryReport/Preflight.
 3. P01F1 — preserve top-level versus sub-object selection identity (`VERIFIED`).
 4. P02 — input topology classification and candidate routing without geometry mutation (`VERIFIED`).
-5. P03 — construct disposable candidates (next; not started).
+5. P03 — bounded PlanarSrf/EdgeSrf/Loft candidate preview and explicit one-Brep accept (`NOT VERIFIED` in Rhino until the field protocol passes).
 
 ## Data and licensing
 

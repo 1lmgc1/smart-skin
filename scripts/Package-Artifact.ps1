@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "0.0.4-p02",
+    [string]$Version = "0.0.5-p03",
     [string]$Commit = "local",
     [string]$OutputRoot = ""
 )
@@ -82,7 +82,7 @@ foreach ($Name in @(
 @(
     "package=$PackageName"
     "version=$Version"
-    "patch=P02"
+    "patch=P03"
     "commit=$Commit"
     "configuration=$Configuration"
     "installer=managed-v1"

@@ -2,7 +2,7 @@
 
 ## Current state
 
-P00, the P01F1 read-only snapshot/preflight baseline and P02 are `VERIFIED` in Rhino 8.18. P01F1 field build commit `550b74ff9f5bd8953d80c28560a9951d39214d55` verified the managed installer lifecycle, one active registration, object/sub-object identity, cancellation without mutation and behavior after restart. P02 field build commit `450bf1e28b77abdb5e17ca6b06fa5c1564963a5b` adds and verifies the read-only endpoint-topology classifier and strategy router. GitHub Actions run 9 passed the build, all 23 Core tests, packaging and installer lifecycle; Rhino testing verified the required routes, object-count invariants, cancellation and restart behavior.
+P00, the P01F1 read-only snapshot/preflight baseline and P02 are `VERIFIED` in Rhino 8.18. P01F1 field build commit `550b74ff9f5bd8953d80c28560a9951d39214d55` verified the managed installer lifecycle, one active registration, object/sub-object identity, cancellation without mutation and behavior after restart. P02 field build commit `450bf1e28b77abdb5e17ca6b06fa5c1564963a5b` verifies the read-only endpoint-topology classifier and strategy router; closure commit `aa3402bc922f74af7867fa799014447861c74304` records its completed field evidence. P03 source implements bounded candidate preview/accept but remains `NOT VERIFIED` until its exact commit passes CI and the Rhino protocol.
 
 ## Source of truth
 
@@ -13,29 +13,30 @@ The repository is authoritative for code, workflows, commits and build artifacts
 ## Resume procedure
 
 1. Read `README.md`, `AGENTS.md`, `docs/PATCH_NOTES.md` and `docs/FIELD_TEST.md`.
-2. Inspect the latest GitHub Actions run and its exact commit SHA.
+2. Inspect the latest GitHub Actions run and its exact commit SHA; do not infer P03 status from the verified P02 run.
 3. Treat P01F1 as the verified snapshot baseline and P02 as the verified read-only routing baseline; neither verifies future construction code.
 4. Preserve the patch discipline: one architectural goal, targeted checks, field test, then the next patch.
 5. Install field-test artifacts only through `INSTALL.cmd`; manual `.rhp` registration is superseded.
 
 ## Current patch
 
-P02 version `0.0.4-p02` adds `SmartSurfacePlan`. It consumes the existing
-`GeometrySnapshot` and `PreflightReport`, builds a tolerance-clustered endpoint
-graph, classifies topology and ranks a small set of Rhino-native strategies.
-`READY` means the observed topology supports the route; `REVIEW` means a route
-exists but warnings or semantic ambiguity remain; `BLOCKED` means no safe route
-is claimed.
+P03 version `0.0.5-p03` adds `SmartSurfaceBuild`. It consumes the verified P02
+route but permits native construction only for `READY` PlanarSrf, EdgeSrf and
+exactly two-section Loft cases. The Core policy caps construction at four
+curves and 64 combined spans. Rhino receives only duplicated curves. Edge
+copies may be reordered/reversed to close the loop; the second Loft copy may be
+reversed to match direction. Source document geometry is untouched.
 
-P02 never calls a construction command. `NetworkSrf` is only a secondary
-recommendation because internal intersections and U/V families are not yet
-measured. Selected parent surfaces are context only; continuity is not inferred.
-Its acceptance scope is complete and `VERIFIED`.
+One valid Brep is previewed through a temporary display conduit. `Accept` adds
+exactly one Brep; Cancel/Esc, blocked input and handled build failure add none.
+Patch/NetworkSrf, seam alignment, repair and quality ranking remain excluded.
+See `docs/PATCH_NOTES.md` for the precise contract and `docs/FIELD_TEST.md` for
+the required evidence.
 
-## Next patch boundary
+## Verification boundary
 
-P03 may begin only as a new single-goal patch. Its intended boundary is
-construction of disposable candidates from the verified P02 route; it must
-define cancellation, complexity limits, timeout behavior, preview/commit
-semantics and document-mutation invariants before implementation. P02 field
-evidence must not be cited as verification of any P03 construction behavior.
+P02 remains `VERIFIED`. P03 source may be called `STATICALLY CHECKED` only after
+review. Compilation/tests, package lifecycle and every Rhino-facing behavior
+remain `NOT VERIFIED` until the exact P03 commit passes the corresponding
+checks. Do not start P04 or broaden constructors before P03 is closed with CI
+and field evidence.

@@ -187,7 +187,7 @@ public sealed class SurfaceStrategyRouterTests
 
         var line = report.ToMachineLine(identity, 12, 12);
 
-        Assert.StartsWith("SMARTSKIN_P02 PASS", line);
+        Assert.StartsWith("SMARTSKIN_P03 PASS", line);
         Assert.Contains("route_status=READY", line);
         Assert.Contains("topology=SINGLE_CLOSED_BOUNDARY", line);
         Assert.Contains("primary=PLANAR_SRF", line);

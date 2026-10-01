@@ -1,4 +1,4 @@
-name: build-p02
+name: build-p03
 
 on:
   push:
@@ -35,7 +35,7 @@ jobs:
       - name: Package field-test artifact
         id: package
         shell: pwsh
-        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.4-p02" -Commit "${{ github.sha }}"
+        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.5-p03" -Commit "${{ github.sha }}"
 
       - name: Installer lifecycle test
         shell: pwsh
@@ -45,7 +45,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P02-installer-report-${{ github.run_number }}
+          name: SmartSkin-P03-installer-report-${{ github.run_number }}
           path: artifacts/installer-lifecycle.log
           if-no-files-found: warn
           retention-days: 30
@@ -54,7 +54,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P02-test-report-${{ github.run_number }}
+          name: SmartSkin-P03-test-report-${{ github.run_number }}
           path: tests/SmartSkin.Core.Tests/TestResults/*.trx
           if-no-files-found: warn
           retention-days: 30
@@ -62,7 +62,7 @@ jobs:
       - name: Upload Rhino field-test package
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P02-${{ github.run_number }}-${{ github.sha }}
+          name: SmartSkin-P03-${{ github.run_number }}-${{ github.sha }}
           path: ${{ steps.package.outputs.artifact_path }}
           if-no-files-found: error
           compression-level: 0

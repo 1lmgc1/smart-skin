@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Preflight and the P02 topology classifier/router are read-only. P02 may rank future construction strategies but must not construct, repair, replace or transform geometry.
+Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Preflight and the P02 topology classifier/router are read-only. P03 may build one bounded disposable PlanarSrf, EdgeSrf or two-section Loft candidate from copies, preview it, and add exactly one Brep only after explicit `Accept`. It must never repair, replace or transform source geometry.
 
 ## Patch discipline
 
@@ -33,5 +33,5 @@ Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Pre
 dotnet restore SmartSkin.sln
 dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=local
 dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --no-build
-.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.4-p02 -Commit local
+.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.5-p03 -Commit local
 ```
