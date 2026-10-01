@@ -66,11 +66,9 @@ Official RhinoCommon API basis:
 
 ## Verification status
 
-- `VERIFIED`: P03 construction behavior listed above on Rhino 8.18 commit
-  `acdcba9cc0586a769bae7a97ed61dadf74055573`.
-- `STATICALLY CHECKED`: P03F1 source replacement of all direct
-  `RhinoDoc.Objects.Count` diagnostics and consistency of version/package/docs.
-- `NOT VERIFIED`: P03F1 compilation, 31 Core tests, packaging, and installer
-  lifecycle until the exact target commit passes `build-p03f1`.
-- `NOT VERIFIED`: corrected active counts in Rhino until `docs/FIELD_TEST.md`
-  passes for the exact P03F1 artifact.
+P03F1 is `VERIFIED` on runtime commit
+`ada5c269c9d270e44952fcc297b611236c4a4782`: GitHub Actions run 12 passed build,
+31/31 Core tests, packaging and installer lifecycle; the existing Rhino 8.18
+count/Undo/restart field results were closed in journal record 017.
+See `P03F1_CLOSURE.md` for provenance. This closure does not claim a new Rhino
+run and does not require reinstalling or retesting the unchanged runtime.

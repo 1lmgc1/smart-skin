@@ -10,8 +10,8 @@ preview/Accept, Cancel/Esc, blocked open chain, Undo, save, and restart.
 The field test exposed one diagnostic defect: `RhinoDoc.Objects.Count` includes
 deleted Undo records. Geometry and Undo were correct, but machine lines could
 report historical totals. P03F1 version `0.0.6-p03f1` changes only that shared
-Rhino-adapter counter and is `NOT VERIFIED` until its CI and focused Rhino test
-pass.
+Rhino-adapter counter and is `VERIFIED` on runtime commit
+`ada5c269c9d270e44952fcc297b611236c4a4782`; see `P03F1_CLOSURE.md`.
 
 ## Source of truth
 
@@ -34,9 +34,9 @@ handling are unchanged.
 1. Read `README.md`, `AGENTS.md`, `docs/PATCH_NOTES.md`, and
    `docs/FIELD_TEST.md`.
 2. Inspect the latest GitHub Actions run and exact commit SHA.
-3. Install only the exact green P03F1 artifact through `INSTALL.cmd`.
-4. Run the focused count/Undo/restart protocol.
-5. Do not start the GUI patch until P03F1 is closed.
+3. Preserve the verified P03F1 runtime; do not reinstall a docs-only rebuild.
+4. Use `P03F1_CLOSURE.md` for the already-reviewed count/Undo/restart evidence.
+5. Prepare the separate minimal toolbar patch with its own CI and GUI gate.
 
 ## Next product patch
 

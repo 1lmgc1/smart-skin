@@ -2,7 +2,7 @@
 
 Rhino 8 surface-assistance plug-in. The intended product is a small, dependable command that diagnoses irregular curve/edge frameworks, infers a likely surface strategy, builds candidates and returns a native Rhino result with an explanation.
 
-## Current state: P03 construction verified; P03F1 count correction pending
+## Current state: P03F1 verified; separate toolbar patch next
 
 P00 proved the repository → CI → artifact → Rhino field-test loop and is `VERIFIED` in Rhino 8.18.
 
@@ -92,8 +92,9 @@ includes deleted objects retained for Undo. Geometry and Undo behaved correctly,
 but later machine lines reported historical totals. P03F1 version
 `0.0.6-p03f1` replaces every direct table count with one active-object
 enumerator shared by Version, Preflight, Plan, and Build. Construction behavior
-is unchanged. P03F1 remains `NOT VERIFIED` until its exact CI artifact passes
-the focused Rhino count/Undo/restart test.
+is unchanged. P03F1 is `VERIFIED` for runtime commit
+`ada5c269c9d270e44952fcc297b611236c4a4782`. Existing CI and Rhino field evidence
+are summarized in [`docs/P03F1_CLOSURE.md`](docs/P03F1_CLOSURE.md).
 
 ## Projects
 
@@ -133,7 +134,7 @@ Extract the artifact, close Rhino and run `INSTALL.cmd`, then follow [`docs/FIEL
 3. P01F1 — preserve top-level versus sub-object selection identity (`VERIFIED`).
 4. P02 — input topology classification and candidate routing without geometry mutation (`VERIFIED`).
 5. P03 — bounded PlanarSrf/EdgeSrf/Loft candidate preview and explicit one-Brep accept (`VERIFIED` construction behavior on commit `acdcba9cc0586a769bae7a97ed61dadf74055573`).
-6. P03F1 — exclude deleted Undo records from all document-count diagnostics (`NOT VERIFIED` until focused CI and Rhino checks pass).
+6. P03F1 — exclude deleted Undo records from all document-count diagnostics (`VERIFIED` on commit `ada5c269c9d270e44952fcc297b611236c4a4782`).
 7. Next — minimal Rhino toolbar with a primary `SmartSurfaceBuild` button.
 
 ## Data and licensing
