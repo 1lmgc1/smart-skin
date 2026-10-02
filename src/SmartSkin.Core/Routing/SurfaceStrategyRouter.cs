@@ -88,10 +88,10 @@ public sealed class SurfaceStrategyRouter
                 {
                     AddCandidate(
                         candidates,
-                        SurfaceStrategy.Patch,
+                        SurfaceStrategy.MatchSrf,
                         95,
-                        "Five to eight Brep edges form one closed loop whose owning trims can supply surface-normal constraints.");
-                    notes.Add("Candidate construction must verify that every selected edge is naked and has exactly one owning trim before requesting tangency.");
+                        "Five to eight Brep edges form one closed loop whose adjacent faces can drive a verified surface match.");
+                    notes.Add("MatchSrf construction must verify that every selected edge is naked and has exactly one owning trim before requesting G0/G1/G2 continuity.");
                 }
                 else
                 {

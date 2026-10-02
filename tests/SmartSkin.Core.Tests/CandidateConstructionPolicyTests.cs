@@ -104,7 +104,7 @@ public sealed class CandidateConstructionPolicyTests
     }
 
     [Fact]
-    public void Evaluate_SixBrepEdgeBoundary_IsReadyForTangentPatch()
+    public void Evaluate_SixBrepEdgeBoundary_IsReadyForMatchSrf()
     {
         var snapshots = new[]
         {
@@ -119,9 +119,10 @@ public sealed class CandidateConstructionPolicyTests
         var plan = Evaluate(snapshots);
 
         Assert.True(plan.IsReady);
-        Assert.True(plan.UsesBoundaryTangency);
-        Assert.Equal(SurfaceStrategy.Patch, plan.Strategy);
-        Assert.Equal(CandidateConstructionCodes.TangentPatchReady, plan.Code);
+        Assert.True(plan.UsesBoundaryMatch);
+        Assert.Equal(SurfaceStrategy.MatchSrf, plan.Strategy);
+        Assert.Equal("MATCH_SRF", plan.StrategyToken);
+        Assert.Equal(CandidateConstructionCodes.MatchSrfReady, plan.Code);
         Assert.Equal(6, plan.CurveCount);
     }
 

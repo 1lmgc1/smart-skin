@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Preflight and the P02 topology classifier/router are read-only. P03 may build one bounded disposable PlanarSrf, EdgeSrf or two-section Loft candidate from copies, preview it, and add exactly one Brep only after explicit confirmation. P03F1 changes only document-count diagnostics so deleted Undo records are excluded. P04 adds a native same-name RUI and its delivery lifecycle. P04F1 expands that accepted toolbar from the Build button to the four existing commands. P05 adds one contextual tangent Patch route for a strict closed loop of five to eight naked Brep edges. P06 replaces the temporary command piano with one Smart Skin product button and one live settings window for the existing bounded result. It must never repair, replace or transform source geometry.
+Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Preflight and the P02 topology classifier/router are read-only. P03 may build one bounded disposable PlanarSrf, EdgeSrf or two-section Loft candidate from copies, preview it, and add exactly one Brep only after explicit confirmation. P03F1 changes only document-count diagnostics so deleted Undo records are excluded. P04 adds a native same-name RUI and its delivery lifecycle. P04F1 temporarily expands that toolbar to four diagnostic buttons. P05 adds a contextual five-to-eight-edge hole-fill route. P06 establishes the accepted one-button/live-window interaction. P07 replaces that route's rejected `CreatePatch` geometry with Rhino 8.21 `MatchSrf`: measured G0/G1/G2, Refine and explicit Average surfaces. Sources remain unchanged unless the user turns Average on; that mode previews the changed context and replaces only the exact owning Breps on confirmation.
 
 ## Patch discipline
 
@@ -15,13 +15,14 @@ Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Pre
 - P04F1 is version `0.0.9-p04f1`: one existing Smart Skin toolbar with buttons for Build, Plan, Preflight and Version. Preserve every P04 GUID and add stable GUIDs for new controls.
 - P05 is version `0.0.10-p05`: one contextual tangent Patch candidate from five to eight selected naked Brep edges. That release preserves all P04F1 toolbar identities and every earlier bounded route.
 - P06 is version `0.0.11-p06`: one visible Smart Skin button, one modeless live-result window, and Rhino-native Enter/Space/right-click confirmation. Retire the three diagnostic button nodes without reusing their GUIDs; preserve their command, macro and bitmap identities. Keep Plan, Preflight and Version available only as command-line diagnostics. Do not add visible Accept/Cancel controls.
+- P07 is version `0.0.12-p07` and requires Rhino 8.21 or later. Keep the P06 button/window contract. The five-to-eight-edge contextual route must use `Brep.CreateFromMatch`; do not silently fall back to `CreatePatch` or report requested continuity as verified continuity. Commit only after measured tolerances pass. Average surfaces is allowed only when every target is an untrimmed natural edge; it is an explicit destructive mode, must prove every seam joined and must be one Rhino undo operation.
 - Preserve fixed plug-in and UI GUIDs. Never reset Rhino layouts or delete shared UI settings to repair a toolbar.
 
 ## Safety invariants
 
-- Never modify source geometry silently. Future repair operations work on copies and explain changes.
+- Never modify source geometry silently. P07 Match-only adds one cap and preserves sources. P07 Average may replace only the selected owning Breps after the user explicitly enables it; preview remains copy-only and the log must report exact added/replaced counts.
 - Rhino API calls stay on Rhino's supported command/UI execution path.
-- Expensive operations require cancellation, a complexity limit and a timeout strategy.
+- Expensive operations require bounded complexity, observable Esc cancellation between supported native calls, and a retry/time-budget strategy. Rhino geometry calls stay on the supported UI thread and are never force-aborted from a worker thread.
 - A bad input must fail with a diagnosis rather than hang.
 - Do not commit secrets, user evidence or forum models without confirmed redistribution rights.
 
@@ -30,6 +31,7 @@ Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Pre
 - Run targeted tests for the changed layer on ordinary patches.
 - Run Rhino smoke tests when plug-in loading, commands or Rhino-facing behavior changes.
 - Run the full regression corpus before releases and after shared Router/Validator/Core changes.
+- Do not spend the user's field-test cycle on PowerShell installer checks; CI builds/packages, and the user reports installation only if it actually fails.
 - Update the Drive journal at checkpoints, architecture decisions, verified patches, serious blockers or handoff—not after every minor edit.
 
 ## Commands
@@ -38,5 +40,5 @@ Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Pre
 dotnet restore SmartSkin.sln
 dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=local
 dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --no-build
-.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.11-p06 -Commit local
+.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.12-p07 -Commit local
 ```

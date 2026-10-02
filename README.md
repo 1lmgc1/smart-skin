@@ -2,7 +2,7 @@
 
 Rhino 8 surface-assistance plug-in. The intended product is a small, dependable command that diagnoses irregular curve/edge frameworks, infers a likely surface strategy, builds candidates and returns a native Rhino result with an explanation.
 
-## Current state: P06 one-button live result settings
+## Current state: P07 measured G0/G1/G2 surface matching
 
 P00 proved the repository → CI → artifact → Rhino field-test loop and is `VERIFIED` in Rhino 8.18.
 
@@ -109,7 +109,7 @@ commands as distinct buttons: Build, Plan, Preflight and Version. It adds no
 runtime command or solver and changes no production C# source. See
 [`docs/P04F1_TOOLBAR.md`](docs/P04F1_TOOLBAR.md).
 
-P05 version `0.0.10-p05` adds the first context-aware soft hole-fill route.
+P05 version `0.0.10-p05` added the first context-aware soft hole-fill route.
 When five to eight selected Brep edges form one strict closed loop, routing
 keeps their owning trims instead of reducing them to detached curves.
 Construction requires every edge to be naked with one adjacent face, then asks
@@ -119,23 +119,38 @@ review. The log says `G1_REQUESTED`; measured continuity and candidate ranking
 remain future work. Preview confirmation now uses Enter, Space or right-click;
 Esc cancels. See [`docs/PATCH_NOTES.md`](docs/PATCH_NOTES.md).
 
-The supplied P05 result model is `VERIFIED` for its bounded construction case:
-all 12 source object IDs remain and one valid single-face Brep is added. This
-does not claim measured G1/G2 quality.
+The supplied P05 result model proved the bounded add/preserve behavior, but
+later measurement rejected its geometry: the cap missed the intended boundary
+by up to about `0.215 mm` in a `0.01 mm` document and did not establish G1/G2.
 
-P06 version `0.0.11-p06` replaces the temporary four-button diagnostic piano
+P06 version `0.0.11-p06` replaced the temporary four-button diagnostic piano
 with one visible `Smart Skin` button. After selection and routing, one modeless
 settings window controls the live in-memory result. Patch exposes Balanced,
 Stiff, Flexible and Detailed presets plus U/V spans, boundary sample spacing,
 flexibility, tangency, trim and preview appearance. PlanarSrf, EdgeSrf and Loft
 still use their bounded native construction and show the same result window
 with Patch-only controls disabled. Enter, Space or right-click adds exactly one
-Brep; Esc or closing the window adds nothing. The source geometry is unchanged.
+Brep; Esc or closing the window adds nothing. This interaction is accepted;
+the underlying contextual Patch result is not.
+
+P07 version `0.0.12-p07` requires Rhino 8.21 and replaces the rejected
+contextual `CreatePatch` path with Rhino's native MatchSrf API. The same window
+now exposes Position/G0, Tangency/G1, Curvature/G2, Refine, Average surfaces
+and isocurve direction. It measures maximum boundary gap, adjacent-face normal
+angle and cross-boundary radius-of-curvature deviation with bounded span-scaled
+near-end sampling, and blocks confirmation
+unless the selected continuity passes. The route is logged as `MATCH_SRF` and
+must also join to a disposable copy of the neighboring Breps as one closed
+interior seam. Match-only then adds one cap without changing sources. For
+all-natural target-edge loops, explicit Average previews the
+changed context and replaces only the recorded owning Breps after proving every
+selected seam joined. Rhino's native Average limitation is reported for
+trimmed target edges instead of being silently approximated.
 
 ## Projects
 
 - `src/SmartSkin.Core` — Rhino-independent code.
-- `src/SmartSkin.Rhino8` — Rhino 8 `.rhp`, initially targeting the `net48` compatibility baseline.
+- `src/SmartSkin.Rhino8` — Rhino 8.21+ `.rhp`, targeting the `net48` compatibility baseline.
 - `tests/SmartSkin.Core.Tests` — console/unit tests.
 
 ## Build
@@ -145,12 +160,13 @@ Requirements for a Windows developer machine:
 - Visual Studio 2022 or the .NET SDK tooling.
 - .NET 8 SDK for tests.
 - .NET Framework 4.8 targeting pack.
+- Rhino 8.21 or later for loading and field testing P07.
 
 ```powershell
 dotnet restore SmartSkin.sln
 dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=local
 dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --no-build
-.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.11-p06 -Commit local
+.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.12-p07 -Commit local
 ```
 
 GitHub Actions performs the same build on Windows and publishes a versioned ZIP for the Rhino test.
@@ -179,6 +195,7 @@ equivalent to the focused one-button live-preview check.
 8. P04F1 — expand the accepted toolbar to all four existing commands, version `0.0.9-p04f1`.
 9. P05 — contextual tangent Patch for one five-to-eight-edge Brep boundary, version `0.0.10-p05`.
 10. P06 — one product button and one live result-settings window, version `0.0.11-p06`.
+11. P07 — measured MatchSrf G0/G1/G2, Refine and explicit Average surfaces, version `0.0.12-p07`.
 
 ## Data and licensing
 

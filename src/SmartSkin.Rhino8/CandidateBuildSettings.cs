@@ -1,57 +1,43 @@
 using System;
+using Rhino.Geometry;
 
 namespace SmartSkin.Rhino8;
 
-internal enum CandidatePreset
+internal enum MatchContinuityLevel
 {
-    Balanced,
-    Stiff,
-    Flexible,
-    Detailed,
-    Custom,
+    Position,
+    Tangency,
+    Curvature,
+}
+
+internal enum MatchIsoDirection
+{
+    Automatic,
+    MatchTarget,
+    Perpendicular,
+    Preserve,
 }
 
 internal sealed class CandidateBuildSettings
 {
-    public const int MinimumSpans = 2;
-    public const int MaximumSpans = 16;
-    public const double MinimumSampleSpacingScale = 0.25;
-    public const double MaximumSampleSpacingScale = 4.0;
-    public const double MinimumFlexibility = 0.001;
-    public const double MaximumFlexibility = 100.0;
+    public const double MinimumCurvatureTolerancePercent = 0.1;
+    public const double MaximumCurvatureTolerancePercent = 100.0;
     public const int MinimumPreviewOpacity = 15;
     public const int MaximumPreviewOpacity = 90;
 
     public CandidateBuildSettings(
-        CandidatePreset preset,
-        int uSpans,
-        int vSpans,
-        double sampleSpacingScale,
-        double flexibility,
-        bool adjustTangency,
-        bool automaticTrim,
+        MatchContinuityLevel continuity,
+        bool refineMatch,
+        double curvatureTolerancePercent,
+        bool averageSurfaces,
+        MatchIsoDirection isoDirection,
         int previewOpacityPercent,
         bool showWires)
     {
-        if (uSpans < MinimumSpans || uSpans > MaximumSpans)
+        if (curvatureTolerancePercent < MinimumCurvatureTolerancePercent
+            || curvatureTolerancePercent > MaximumCurvatureTolerancePercent)
         {
-            throw new ArgumentOutOfRangeException(nameof(uSpans));
-        }
-
-        if (vSpans < MinimumSpans || vSpans > MaximumSpans)
-        {
-            throw new ArgumentOutOfRangeException(nameof(vSpans));
-        }
-
-        if (sampleSpacingScale < MinimumSampleSpacingScale
-            || sampleSpacingScale > MaximumSampleSpacingScale)
-        {
-            throw new ArgumentOutOfRangeException(nameof(sampleSpacingScale));
-        }
-
-        if (flexibility < MinimumFlexibility || flexibility > MaximumFlexibility)
-        {
-            throw new ArgumentOutOfRangeException(nameof(flexibility));
+            throw new ArgumentOutOfRangeException(nameof(curvatureTolerancePercent));
         }
 
         if (previewOpacityPercent < MinimumPreviewOpacity
@@ -60,68 +46,71 @@ internal sealed class CandidateBuildSettings
             throw new ArgumentOutOfRangeException(nameof(previewOpacityPercent));
         }
 
-        Preset = preset;
-        USpans = uSpans;
-        VSpans = vSpans;
-        SampleSpacingScale = sampleSpacingScale;
-        Flexibility = flexibility;
-        AdjustTangency = adjustTangency;
-        AutomaticTrim = automaticTrim;
+        Continuity = continuity;
+        RefineMatch = refineMatch;
+        CurvatureTolerancePercent = curvatureTolerancePercent;
+        AverageSurfaces = averageSurfaces;
+        IsoDirection = isoDirection;
         PreviewOpacityPercent = previewOpacityPercent;
         ShowWires = showWires;
     }
 
-    public CandidatePreset Preset { get; }
+    public MatchContinuityLevel Continuity { get; }
 
-    public int USpans { get; }
+    public bool RefineMatch { get; }
 
-    public int VSpans { get; }
+    public double CurvatureTolerancePercent { get; }
 
-    public double SampleSpacingScale { get; }
+    public bool AverageSurfaces { get; }
 
-    public double Flexibility { get; }
-
-    public bool AdjustTangency { get; }
-
-    public bool AutomaticTrim { get; }
+    public MatchIsoDirection IsoDirection { get; }
 
     public int PreviewOpacityPercent { get; }
 
     public bool ShowWires { get; }
 
-    public string PresetToken => Preset.ToString().ToUpperInvariant();
-
-    public static CandidateBuildSettings Balanced => CreatePreset(CandidatePreset.Balanced);
-
-    public static CandidateBuildSettings CreatePreset(
-        CandidatePreset preset,
-        int previewOpacityPercent = 45,
-        bool showWires = true)
+    public string ContinuityToken => Continuity switch
     {
-        return preset switch
-        {
-            CandidatePreset.Balanced => new CandidateBuildSettings(
-                preset, 8, 8, 1.0, 1.0, true, true, previewOpacityPercent, showWires),
-            CandidatePreset.Stiff => new CandidateBuildSettings(
-                preset, 8, 8, 1.0, 0.1, true, true, previewOpacityPercent, showWires),
-            CandidatePreset.Flexible => new CandidateBuildSettings(
-                preset, 8, 8, 1.0, 10.0, true, true, previewOpacityPercent, showWires),
-            CandidatePreset.Detailed => new CandidateBuildSettings(
-                preset, 12, 12, 0.5, 1.0, true, true, previewOpacityPercent, showWires),
-            _ => throw new ArgumentOutOfRangeException(nameof(preset), "Custom is not a fixed preset."),
-        };
-    }
+        MatchContinuityLevel.Position => "G0",
+        MatchContinuityLevel.Tangency => "G1",
+        MatchContinuityLevel.Curvature => "G2",
+        _ => throw new ArgumentOutOfRangeException(),
+    };
+
+    public Continuity RhinoContinuity => Continuity switch
+    {
+        MatchContinuityLevel.Position => Rhino.Geometry.Continuity.C0_continuous,
+        MatchContinuityLevel.Tangency => Rhino.Geometry.Continuity.G1_continuous,
+        MatchContinuityLevel.Curvature => Rhino.Geometry.Continuity.G2_continuous,
+        _ => throw new ArgumentOutOfRangeException(),
+    };
+
+    public PreserveIsoCurveMethod RhinoPreserveIso => IsoDirection switch
+    {
+        MatchIsoDirection.Automatic => PreserveIsoCurveMethod.Automatic,
+        MatchIsoDirection.MatchTarget => PreserveIsoCurveMethod.MatchTarget,
+        MatchIsoDirection.Perpendicular => PreserveIsoCurveMethod.Perpendicular,
+        MatchIsoDirection.Preserve => PreserveIsoCurveMethod.Preserve,
+        _ => throw new ArgumentOutOfRangeException(),
+    };
+
+    public static CandidateBuildSettings Default => new(
+        MatchContinuityLevel.Curvature,
+        refineMatch: true,
+        curvatureTolerancePercent: 5.0,
+        averageSurfaces: false,
+        MatchIsoDirection.Automatic,
+        previewOpacityPercent: 45,
+        showWires: true);
 
     public CandidateBuildSettings WithAppearance(int previewOpacityPercent, bool showWires)
     {
         return new CandidateBuildSettings(
-            Preset,
-            USpans,
-            VSpans,
-            SampleSpacingScale,
-            Flexibility,
-            AdjustTangency,
-            AutomaticTrim,
+            Continuity,
+            RefineMatch,
+            CurvatureTolerancePercent,
+            AverageSurfaces,
+            IsoDirection,
             previewOpacityPercent,
             showWires);
     }

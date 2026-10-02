@@ -68,7 +68,7 @@ public sealed class SurfaceStrategyRouterTests
     }
 
     [Fact]
-    public void Route_SixBrepEdgeClosedLoop_UsesContextualPatch()
+    public void Route_SixBrepEdgeClosedLoop_UsesMatchSrf()
     {
         var report = Route(
             OpenEdge("a", Point(0.0, 0.0), Point(4.0, 0.0)),
@@ -81,7 +81,8 @@ public sealed class SurfaceStrategyRouterTests
         Assert.Equal(RouteStatus.Ready, report.Status);
         Assert.Equal(TopologyKind.ClosedBoundaryLoop, report.Topology.Kind);
         Assert.Equal(6, report.Topology.BrepEdgeCount);
-        AssertPrimary(report, SurfaceStrategy.Patch);
+        AssertPrimary(report, SurfaceStrategy.MatchSrf);
+        Assert.Contains(report.ToDisplayLines(), line => line.Contains("MATCH_SRF"));
         Assert.Contains(report.Notes, note => note.Contains("naked"));
     }
 
@@ -205,7 +206,7 @@ public sealed class SurfaceStrategyRouterTests
 
         var line = report.ToMachineLine(identity, 12, 12);
 
-        Assert.StartsWith("SMARTSKIN_P06 PASS", line);
+        Assert.StartsWith("SMARTSKIN_P07 PASS", line);
         Assert.Contains("route_status=READY", line);
         Assert.Contains("topology=SINGLE_CLOSED_BOUNDARY", line);
         Assert.Contains("primary=PLANAR_SRF", line);

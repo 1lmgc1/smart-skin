@@ -17,6 +17,7 @@ public enum SurfaceStrategy
     PlanarSrf,
     EdgeSrf,
     Loft,
+    MatchSrf,
     Patch,
     NetworkSrf
 }
@@ -120,7 +121,7 @@ public sealed class SurfaceRouteReport
                 var candidate = Candidates[index];
                 lines.Add(
                     $"  {candidate.Rank.ToString(CultureInfo.InvariantCulture)}."
-                    + $" {candidate.Strategy}"
+                    + $" {RoutingTokens.Strategy(candidate.Strategy)}"
                     + $" | confidence={candidate.Confidence.ToString(CultureInfo.InvariantCulture)}"
                     + $" | {candidate.Rationale}");
             }

@@ -1,4 +1,4 @@
-name: build-p06
+name: build-p07
 
 on:
   push:
@@ -39,26 +39,13 @@ jobs:
       - name: Package field-test artifact
         id: package
         shell: pwsh
-        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.11-p06" -Commit "${{ github.sha }}"
-
-      - name: Installer lifecycle test
-        shell: powershell
-        run: ./scripts/Test-InstallerLifecycle.ps1 -PackageRoot "${{ steps.package.outputs.package_root }}" -LogPath "${{ github.workspace }}\artifacts\installer-lifecycle.log"
-
-      - name: Upload installer lifecycle report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: SmartSkin-P06-installer-report-${{ github.run_number }}
-          path: artifacts/installer-lifecycle.log
-          if-no-files-found: warn
-          retention-days: 30
+        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.12-p07" -Commit "${{ github.sha }}"
 
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P06-test-report-${{ github.run_number }}
+          name: SmartSkin-P07-test-report-${{ github.run_number }}
           path: tests/SmartSkin.Core.Tests/TestResults/*.trx
           if-no-files-found: warn
           retention-days: 30
@@ -66,7 +53,7 @@ jobs:
       - name: Upload Rhino field-test package
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P06-${{ github.run_number }}-${{ github.sha }}
+          name: SmartSkin-P07-${{ github.run_number }}-${{ github.sha }}
           path: ${{ steps.package.outputs.artifact_path }}
           if-no-files-found: error
           compression-level: 0

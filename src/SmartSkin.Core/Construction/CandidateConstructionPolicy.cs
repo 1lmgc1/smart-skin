@@ -10,7 +10,7 @@ namespace SmartSkin.Core.Construction;
 public static class CandidateConstructionCodes
 {
     public const string Ready = "P03_READY";
-    public const string TangentPatchReady = "P05_TANGENT_PATCH_READY";
+    public const string MatchSrfReady = "P07_MATCH_SRF_READY";
     public const string RouteNotReady = "P03_ROUTE_NOT_READY";
     public const string StrategyUnsupported = "P03_STRATEGY_UNSUPPORTED";
     public const string NonCurveInput = "P03_NON_CURVE_INPUT";
@@ -21,7 +21,7 @@ public static class CandidateConstructionCodes
     public const string InvalidEdgeInput = "P03_INVALID_EDGE_INPUT";
     public const string LoftTwoSectionsOnly = "P03_LOFT_TWO_SECTIONS_ONLY";
     public const string LoftClosureMismatch = "P03_LOFT_CLOSURE_MISMATCH";
-    public const string InvalidTangentPatchInput = "P05_INVALID_TANGENT_PATCH_INPUT";
+    public const string InvalidMatchSrfInput = "P07_INVALID_MATCH_SRF_INPUT";
 }
 
 public sealed class CandidateConstructionPlan
@@ -33,7 +33,7 @@ public sealed class CandidateConstructionPlan
         string message,
         int curveCount,
         int totalSpanCount,
-        bool usesBoundaryTangency)
+        bool usesBoundaryMatch)
     {
         IsReady = isReady;
         Strategy = strategy;
@@ -41,7 +41,7 @@ public sealed class CandidateConstructionPlan
         Message = message ?? throw new ArgumentNullException(nameof(message));
         CurveCount = curveCount;
         TotalSpanCount = totalSpanCount;
-        UsesBoundaryTangency = usesBoundaryTangency;
+        UsesBoundaryMatch = usesBoundaryMatch;
     }
 
     public bool IsReady { get; }
@@ -60,7 +60,7 @@ public sealed class CandidateConstructionPlan
 
     public int TotalSpanCount { get; }
 
-    public bool UsesBoundaryTangency { get; }
+    public bool UsesBoundaryMatch { get; }
 
     public string ToDisplayLine()
     {
@@ -76,7 +76,7 @@ public sealed class CandidateConstructionPlan
 public sealed class CandidateConstructionPolicy
 {
     public const int MaximumCurveCount = 4;
-    public const int MaximumTangentPatchEdgeCount = 8;
+    public const int MaximumBoundaryMatchEdgeCount = 8;
     public const int MaximumTotalSpanCount = 64;
 
     public CandidateConstructionPlan Evaluate(
@@ -97,10 +97,10 @@ public sealed class CandidateConstructionPolicy
         var curves = snapshots
             .Where(snapshot => snapshot.Kind == GeometryKind.Curve || snapshot.Kind == GeometryKind.BrepEdge)
             .ToArray();
-        var usesBoundaryTangency = primary == SurfaceStrategy.Patch
+        var usesBoundaryMatch = primary == SurfaceStrategy.MatchSrf
             && route.Topology.Kind == TopologyKind.ClosedBoundaryLoop
             && curves.Length >= 5
-            && curves.Length <= MaximumTangentPatchEdgeCount
+            && curves.Length <= MaximumBoundaryMatchEdgeCount
             && curves.All(curve => curve.Kind == GeometryKind.BrepEdge);
 
         if (route.Status != RouteStatus.Ready || !primary.HasValue)
@@ -115,7 +115,7 @@ public sealed class CandidateConstructionPolicy
         if (primary.Value != SurfaceStrategy.PlanarSrf
             && primary.Value != SurfaceStrategy.EdgeSrf
             && primary.Value != SurfaceStrategy.Loft
-            && !usesBoundaryTangency)
+            && !usesBoundaryMatch)
         {
             return Blocked(
                 primary,
@@ -133,8 +133,8 @@ public sealed class CandidateConstructionPolicy
                 curves);
         }
 
-        var maximumCurveCount = usesBoundaryTangency
-            ? MaximumTangentPatchEdgeCount
+        var maximumCurveCount = usesBoundaryMatch
+            ? MaximumBoundaryMatchEdgeCount
             : MaximumCurveCount;
         if (curves.Length > maximumCurveCount)
         {
@@ -164,7 +164,7 @@ public sealed class CandidateConstructionPolicy
                 $"Combined curve spans exceed the P03 construction limit of {MaximumTotalSpanCount}.",
                 curves.Length,
                 totalSpans,
-                usesBoundaryTangency);
+                usesBoundaryMatch);
         }
 
         switch (primary.Value)
@@ -179,7 +179,7 @@ public sealed class CandidateConstructionPolicy
                         "PlanarSrf requires exactly one closed curve proven planar by preflight.",
                         curves.Length,
                         totalSpans,
-                        usesBoundaryTangency);
+                        usesBoundaryMatch);
                 }
 
                 break;
@@ -196,7 +196,7 @@ public sealed class CandidateConstructionPolicy
                         "EdgeSrf requires two to four open curves in the verified closed-loop route.",
                         curves.Length,
                         totalSpans,
-                        usesBoundaryTangency);
+                        usesBoundaryMatch);
                 }
 
                 break;
@@ -211,7 +211,7 @@ public sealed class CandidateConstructionPolicy
                         "P03 limits Loft to exactly two sections; section sorting for larger sets is not implemented.",
                         curves.Length,
                         totalSpans,
-                        usesBoundaryTangency);
+                        usesBoundaryMatch);
                 }
 
                 if (curves[0].IsClosed != curves[1].IsClosed)
@@ -223,22 +223,22 @@ public sealed class CandidateConstructionPolicy
                         "Both Loft sections must be either open or closed.",
                         curves.Length,
                         totalSpans,
-                        usesBoundaryTangency);
+                        usesBoundaryMatch);
                 }
 
                 break;
 
-            case SurfaceStrategy.Patch:
-                if (!usesBoundaryTangency)
+            case SurfaceStrategy.MatchSrf:
+                if (!usesBoundaryMatch)
                 {
                     return new CandidateConstructionPlan(
                         false,
                         primary,
-                        CandidateConstructionCodes.InvalidTangentPatchInput,
-                        "Tangent Patch requires one strict closed loop of five to eight Brep edge sub-objects.",
+                        CandidateConstructionCodes.InvalidMatchSrfInput,
+                        "MatchSrf requires one strict closed loop of five to eight Brep edge sub-objects.",
                         curves.Length,
                         totalSpans,
-                        usesBoundaryTangency);
+                        usesBoundaryMatch);
                 }
 
                 break;
@@ -250,15 +250,15 @@ public sealed class CandidateConstructionPolicy
         return new CandidateConstructionPlan(
             true,
             primary,
-            usesBoundaryTangency
-                ? CandidateConstructionCodes.TangentPatchReady
+            usesBoundaryMatch
+                ? CandidateConstructionCodes.MatchSrfReady
                 : CandidateConstructionCodes.Ready,
-            usesBoundaryTangency
-                ? "One disposable tangent Patch candidate may be built from owning Brep trims; source geometry remains unchanged."
+            usesBoundaryMatch
+                ? "One disposable MatchSrf cap may be built and verified against adjacent Brep faces; source geometry remains unchanged unless Average is enabled."
                 : "One disposable candidate may be built for preview; source geometry remains unchanged.",
             curves.Length,
             totalSpans,
-            usesBoundaryTangency);
+            usesBoundaryMatch);
     }
 
     private static CandidateConstructionPlan Blocked(
@@ -274,7 +274,7 @@ public sealed class CandidateConstructionPolicy
             message,
             curves.Count,
             SumSpans(curves),
-            usesBoundaryTangency: false);
+            usesBoundaryMatch: false);
     }
 
     private static int SumSpans(IEnumerable<GeometrySnapshot> curves)

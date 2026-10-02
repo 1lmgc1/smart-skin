@@ -1,83 +1,92 @@
-# P06 one-button live result settings
+# P07 measured surface matching
 
-Version: `0.0.11-p06`.
-Baseline: P05 commit
-`59c41213482702b2ed212bfcc0c237937a176aa4`.
+Version: `0.0.12-p07`.
+Baseline: P06 commit `a33f0e92bfa14ad0cbe2a7a38e7b180545212d40`.
+Minimum runtime: Rhino `8.21`.
 
-## Objective
+## Why P07 exists
 
-Replace the temporary four-command test toolbar with the intended product
-interaction: one Smart Skin button, one selection/routing pass, one settings
-window with a live viewport result, then ordinary Rhino confirmation.
+The P06 interaction is accepted, but its contextual result is rejected as
+geometry: `Brep.CreatePatch` produced a visible edge deviation of about
+`0.215 mm` in a document with `0.01 mm` absolute tolerance and did not prove
+position, tangency or curvature continuity. P07 preserves the one-button/live
+window interaction and replaces only that geometry route.
 
-P06 changes the interaction layer around the existing bounded constructors. It
-does not add a new surface strategy, automatic hole discovery, joining or
-quality scoring.
+## Matched-cap route
 
-## Product flow
+For one closed loop of five to eight naked Brep edges, Smart Skin now:
 
-1. Click the single `Smart Skin` toolbar button.
-2. Select supported curves or Brep edge sub-objects and finish selection.
-3. Inspect and tune one disposable cyan result in the modeless settings window.
-4. Press Enter, Space or right-click to add exactly one Brep. Press Esc or close
-   the window to add nothing.
+1. preserves each selected edge's adjacent Brep face;
+2. joins copies of the owning Breps into one disposable context shell;
+3. builds one disposable untrimmed closed-edge seed cap;
+4. calls Rhino 8.21 `Brep.CreateFromMatch` against the mapped Brep edges;
+5. samples the result and blocks confirmation unless the selected continuity
+   passes its tolerances;
+6. joins the cap to a disposable copy of the context and proves that the cap
+   boundary became one closed interior seam at document tolerance.
 
-There are no additional Accept/Cancel buttons or command-line options.
+The builder tries both closed-edge match directions (and both target directions
+for Average) within a fixed two/four-attempt bound. It keeps the first variant
+that passes continuity and Join proof and reports both direction flags.
+Owning context is capped by face, edge and surface-complexity budgets; after a
+slow native return, the ten-second build budget prevents starting more variants.
+Esc is observed before variants and again after each synchronous native return;
+Rhino's MatchSrf call itself is not force-aborted on another thread.
 
-## Effective controls
+There is no contextual `CreatePatch` fallback. A failed context join, ambiguous
+edge map, failed native match or unavailable measurement is a diagnosed
+`BLOCKED` result.
 
-The contextual Patch route exposes only values sent to Rhino's native
-`Brep.CreatePatch` overload:
+## Window controls
 
-- presets: Balanced (8×8, 1× sampling, flexibility 1), Stiff (flexibility
-  0.1), Flexible (flexibility 10) and Detailed (12×12, 0.5× sampling);
-- U and V spans, bounded to 2–16;
-- sample-spacing scale, bounded to 0.25–4× the automatic P05 spacing;
-- flexibility, bounded to 0.001–100;
-- adjacent-face tangency request and automatic boundary trim.
+- `Position (G0)`, `Tangency (G1)` and `Curvature (G2)` map to native MatchSrf
+  continuity modes.
+- `Refine match` uses document distance/angle tolerances and the displayed
+  curvature tolerance.
+- `Average surfaces` asks Rhino to modify both sides. Rhino supports this only
+  when every target is an untrimmed natural surface edge. Smart Skin checks
+  that precondition explicitly instead of pretending a trimmed edge was
+  averaged. Its orange copy preview is explicit; confirmation replaces the
+  exact owning Breps only after every selected seam is proved interior in one
+  joined result. The new joined object explicitly inherits the first source
+  object's attributes; this policy is shown in the window and machine log.
+- Isocurve direction exposes Automatic, Match target, Perpendicular and
+  Preserve.
+- Opacity and wires affect display only.
 
-Preview opacity and preview wires affect display only. Direct edits become the
-Custom preset. Changes are coalesced for 250 ms before rebuilding; confirmation
-flushes a pending rebuild first. If a rebuild fails, the old preview is removed
-and confirmation remains blocked until a valid result exists.
+Default is G2 + Refine, Average off. Enter, Space and right-click confirm;
+Esc/window close cancel. No Accept/Cancel buttons were added.
 
-PlanarSrf, EdgeSrf and Loft use the same result window, but Patch-only controls
-are disabled because those values do not affect their native constructors.
+## Verification and commit
 
-## Toolbar contract
+- G0: maximum cap/target boundary gap must be at or below document absolute
+  tolerance.
+- G1: G0 plus sampled adjacent-face normal angle at or below document angle
+  tolerance.
+- G2: G1 plus sampled cross-boundary radius-of-curvature deviation at or below
+  the selected percent tolerance.
+- G1/G2 sampling is bounded, includes near-end samples, scales with edge spans,
+  and is reported as `sampled_max_*` with its exact sample count.
+- Match-only adds one cap and leaves sources unchanged, but only after the
+  disposable joined-context proof succeeds.
+- Average adds one joined result and deletes only the recorded owning Breps;
+  any partial delete is rolled back before reporting failure.
 
-- One visible group, one toolbar and one product button.
-- The released RUI, plug-in, group, group-item, toolbar, Build macro, Build
-  button and Build bitmap GUIDs remain fixed.
-- The product button runs exactly `! _SmartSurfaceBuild`, is labelled
-  `Smart Skin`, and names `SmartSurfaceBuild` in its tooltip.
-- Plan, Preflight and Version remain supported command-line diagnostics. Their
-  released macro and bitmap identities remain in the RUI but are not referenced
-  by visible toolbar buttons.
-- No Rhino menu, right-click macro, layout reset or shared UI deletion is added.
+The supplied six-edge fixture contains trimmed target edges, so its first P07
+field test covers G2 Match-only and exact Join compatibility. Native Average is
+available for eligible all-natural edge loops; converting arbitrary trimmed
+targets into averageable surfaces is not claimed by this patch.
 
-## Safety invariants
+Machine output uses `strategy=MATCH_SRF`, reports the selected boundary count as
+`proved_target_edges` only after the complete loop passes Join proof, and
+distinguishes `G0_VERIFIED`, `G1_SAMPLED_VERIFIED`,
+`G2_SAMPLED_VERIFIED`, `NOT_VERIFIED` and `*_OUT_OF_TOLERANCE`; a request is
+never logged as proof.
 
-- Source objects are never changed, repaired, transformed, joined or deleted.
-- At most one disposable candidate is retained; replacing it disposes the old
-  candidate.
-- The active document count must remain unchanged through selection, building,
-  settings changes and preview.
-- Only confirmation with a current valid candidate can add one native Brep.
-- Esc, window close, a failed rebuild or a blocked route adds nothing.
+## Acceptance state
 
-## Acceptance
-
-- `STATICALLY CHECKED`: compile against the Rhino 8.18 RhinoCommon, Rhino.UI and
-  Eto APIs with warnings treated as errors.
-- GitHub Actions must restore, build, run the full Core regression, validate the
-  one-button RUI, package `0.0.11-p06` and pass installer lifecycle automation.
-- `NOT VERIFIED` until one Rhino 8.18 field check proves the single button,
-  visible settings window, live Patch change, native confirmation and exact
-  object-count invariant.
-
-## Intentionally untouched
-
-Measured gap/tangent-angle quality, candidate ranking, G2 claims, automatic
-opening detection, multi-hole batching, joining and source repair remain later
-geometry objectives.
+- Rhino 8.21 API compilation: `STATICALLY CHECKED` locally.
+- GitHub `build-p07`, Core regression, toolbar validation, packaging and
+  artifact identity: pending exact published commit.
+- Rhino geometry behavior: `NOT VERIFIED` until the single test in
+  `FIELD_TEST.md` returns.

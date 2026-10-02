@@ -13,10 +13,12 @@ internal sealed class SmartSkinLivePreviewSession : IDisposable
     private readonly CandidateConstructionPlan _plan;
     private readonly IReadOnlyList<ObjRef> _references;
     private readonly double _absoluteTolerance;
+    private readonly double _angleToleranceRadians;
     private readonly RhinoCandidateBuilder _builder = new();
     private readonly CandidatePreviewConduit _conduit;
     private CandidateBuildOutcome? _currentOutcome;
     private CandidateBuildSettings _currentSettings;
+    private volatile bool _cancellationRequested;
     private bool _disposed;
 
     public SmartSkinLivePreviewSession(
@@ -24,6 +26,7 @@ internal sealed class SmartSkinLivePreviewSession : IDisposable
         CandidateConstructionPlan plan,
         IReadOnlyList<ObjRef> references,
         double absoluteTolerance,
+        double angleToleranceRadians,
         CandidateBuildSettings initialSettings)
     {
         _document = document ?? throw new ArgumentNullException(nameof(document));
@@ -32,6 +35,7 @@ internal sealed class SmartSkinLivePreviewSession : IDisposable
             ? throw new ArgumentNullException(nameof(references))
             : new List<ObjRef>(references);
         _absoluteTolerance = absoluteTolerance;
+        _angleToleranceRadians = angleToleranceRadians;
         _currentSettings = initialSettings ?? throw new ArgumentNullException(nameof(initialSettings));
         _conduit = new CandidatePreviewConduit(
             initialSettings.PreviewOpacityPercent,
@@ -39,6 +43,7 @@ internal sealed class SmartSkinLivePreviewSession : IDisposable
         {
             Enabled = true,
         };
+        RhinoApp.EscapeKeyPressed += HandleEscapeKeyPressed;
     }
 
     public CandidateBuildOutcome? CurrentOutcome => _currentOutcome;
@@ -59,11 +64,20 @@ internal sealed class SmartSkinLivePreviewSession : IDisposable
             throw new ArgumentNullException(nameof(settings));
         }
 
-        var next = _builder.Build(_plan, _references, _absoluteTolerance, settings);
+        _cancellationRequested = false;
+        var next = _builder.Build(
+            _plan,
+            _references,
+            _absoluteTolerance,
+            _angleToleranceRadians,
+            settings,
+            () => _cancellationRequested);
         var previous = _currentOutcome;
         _currentOutcome = next;
         _currentSettings = settings;
-        _conduit.SetCandidate(next.Success ? next.Candidate : null);
+        _conduit.SetCandidates(
+            next.Success ? next.Candidate : null,
+            next.Success ? next.AveragedContext : null);
         _conduit.SetAppearance(settings.PreviewOpacityPercent, settings.ShowWires);
         previous?.Dispose();
         _document.Views.Redraw();
@@ -91,8 +105,8 @@ internal sealed class SmartSkinLivePreviewSession : IDisposable
         }
 
         _disposed = true;
-        _conduit.Enabled = false;
-        _conduit.SetCandidate(null);
+        RhinoApp.EscapeKeyPressed -= HandleEscapeKeyPressed;
+        _conduit.Dispose();
         _currentOutcome?.Dispose();
         _currentOutcome = null;
         _document.Views.Redraw();
@@ -104,5 +118,10 @@ internal sealed class SmartSkinLivePreviewSession : IDisposable
         {
             throw new ObjectDisposedException(nameof(SmartSkinLivePreviewSession));
         }
+    }
+
+    private void HandleEscapeKeyPressed(object? sender, EventArgs eventArgs)
+    {
+        _cancellationRequested = true;
     }
 }

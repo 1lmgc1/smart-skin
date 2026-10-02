@@ -11,28 +11,33 @@ namespace SmartSkin.Rhino8;
 
 internal sealed class SmartSkinPreviewForm : Form
 {
-    private static readonly string[] PresetNames =
+    private static readonly string[] ContinuityNames =
     {
-        "Balanced",
-        "Stiff",
-        "Flexible",
-        "Detailed",
-        "Custom",
+        "Position (G0)",
+        "Tangency (G1)",
+        "Curvature (G2)",
+    };
+
+    private static readonly string[] IsoDirectionNames =
+    {
+        "Automatic",
+        "Match target",
+        "Perpendicular",
+        "Preserve seed",
     };
 
     private readonly CandidateConstructionPlan _plan;
     private readonly SmartSkinLivePreviewSession _session;
-    private readonly DropDown _preset = new();
-    private readonly NumericStepper _uSpans = new();
-    private readonly NumericStepper _vSpans = new();
-    private readonly NumericStepper _sampleSpacingPercent = new();
-    private readonly NumericStepper _flexibility = new();
-    private readonly CheckBox _adjustTangency = new();
-    private readonly CheckBox _automaticTrim = new();
+    private readonly DropDown _continuity = new();
+    private readonly CheckBox _refineMatch = new();
+    private readonly NumericStepper _curvatureTolerance = new();
+    private readonly CheckBox _averageSurfaces = new();
+    private readonly DropDown _isoDirection = new();
     private readonly Slider _previewOpacity = new();
     private readonly Label _previewOpacityValue = new();
     private readonly CheckBox _showWires = new();
     private readonly Label _status = new();
+    private readonly Label _instruction = new();
     private readonly UITimer _rebuildTimer = new();
     private bool _suppressChanges;
     private bool _closingForDecision;
@@ -49,8 +54,10 @@ internal sealed class SmartSkinPreviewForm : Form
             throw new ArgumentNullException(nameof(document));
         }
 
-        Title = "Smart Skin — result preview";
-        ClientSize = new Size(440, 590);
+        Title = _plan.Strategy == SurfaceStrategy.MatchSrf
+            ? "Smart Skin — matched result"
+            : "Smart Skin — result preview";
+        ClientSize = new Size(470, 560);
         Resizable = false;
         Maximizable = false;
         Minimizable = false;
@@ -94,70 +101,50 @@ internal sealed class SmartSkinPreviewForm : Form
     {
         _suppressChanges = true;
 
-        _preset.DataStore = PresetNames;
-        _preset.SelectedIndex = (int)settings.Preset;
-        _preset.Width = 205;
+        _continuity.DataStore = ContinuityNames;
+        _continuity.SelectedIndex = (int)settings.Continuity;
+        _continuity.Width = 225;
+        _continuity.ToolTip = "Match position, tangent direction, or radius of curvature to the adjacent Brep faces.";
 
-        ConfigureStepper(
-            _uSpans,
-            CandidateBuildSettings.MinimumSpans,
-            CandidateBuildSettings.MaximumSpans,
-            settings.USpans,
-            increment: 1.0,
-            decimalPlaces: 0,
-            "Surface control-point spans in the U direction.");
-        ConfigureStepper(
-            _vSpans,
-            CandidateBuildSettings.MinimumSpans,
-            CandidateBuildSettings.MaximumSpans,
-            settings.VSpans,
-            increment: 1.0,
-            decimalPlaces: 0,
-            "Surface control-point spans in the V direction.");
-        ConfigureStepper(
-            _sampleSpacingPercent,
-            CandidateBuildSettings.MinimumSampleSpacingScale * 100.0,
-            CandidateBuildSettings.MaximumSampleSpacingScale * 100.0,
-            settings.SampleSpacingScale * 100.0,
-            increment: 25.0,
-            decimalPlaces: 0,
-            "Spacing between boundary samples. Lower values sample the edge more densely.");
-        ConfigureStepper(
-            _flexibility,
-            CandidateBuildSettings.MinimumFlexibility,
-            CandidateBuildSettings.MaximumFlexibility,
-            settings.Flexibility,
-            increment: 0.1,
-            decimalPlaces: 3,
-            "Lower values make the result stiffer; higher values make it more flexible.");
+        _refineMatch.Text = "Refine match to document tolerances";
+        _refineMatch.Checked = settings.RefineMatch;
+        _refineMatch.ToolTip = "Allow Rhino to add knot rows until the selected continuity is within tolerance.";
 
-        _adjustTangency.Text = "Match boundary tangency (G1 request)";
-        _adjustTangency.Checked = settings.AdjustTangency;
-        _adjustTangency.ToolTip = "Use adjacent Brep-face normals while fitting the Patch.";
+        _curvatureTolerance.MinValue = CandidateBuildSettings.MinimumCurvatureTolerancePercent;
+        _curvatureTolerance.MaxValue = CandidateBuildSettings.MaximumCurvatureTolerancePercent;
+        _curvatureTolerance.Value = settings.CurvatureTolerancePercent;
+        _curvatureTolerance.Increment = 0.5;
+        _curvatureTolerance.DecimalPlaces = 1;
+        _curvatureTolerance.MaximumDecimalPlaces = 2;
+        _curvatureTolerance.Width = 225;
+        _curvatureTolerance.ToolTip = "Maximum radius-of-curvature deviation used by Refine and by commit verification.";
 
-        _automaticTrim.Text = "Trim result to selected boundary";
-        _automaticTrim.Checked = settings.AutomaticTrim;
-        _automaticTrim.ToolTip = "Return the Patch trimmed to the selected closed edge loop.";
+        _averageSurfaces.Text = "Average surfaces (changes adjacent Breps)";
+        _averageSurfaces.Checked = settings.AverageSurfaces;
+        _averageSurfaces.ToolTip = "For untrimmed target surfaces, move both sides to an intermediate shape. Enter replaces the selected owning Breps only after every seam joins; the result inherits the first source object's attributes.";
+
+        _isoDirection.DataStore = IsoDirectionNames;
+        _isoDirection.SelectedIndex = (int)settings.IsoDirection;
+        _isoDirection.Width = 225;
+        _isoDirection.ToolTip = "Control how the matched cap isocurves meet the target boundary.";
 
         _previewOpacity.MinValue = CandidateBuildSettings.MinimumPreviewOpacity;
         _previewOpacity.MaxValue = CandidateBuildSettings.MaximumPreviewOpacity;
         _previewOpacity.Value = settings.PreviewOpacityPercent;
         _previewOpacity.TickFrequency = 5;
         _previewOpacity.SnapToTick = true;
-        _previewOpacity.Width = 205;
+        _previewOpacity.Width = 225;
         _previewOpacityValue.Text = $"{settings.PreviewOpacityPercent.ToString(CultureInfo.InvariantCulture)}%";
 
         _showWires.Text = "Show preview wires";
         _showWires.Checked = settings.ShowWires;
 
-        var patchControlsEnabled = _plan.Strategy == SurfaceStrategy.Patch;
-        _preset.Enabled = patchControlsEnabled;
-        _uSpans.Enabled = patchControlsEnabled;
-        _vSpans.Enabled = patchControlsEnabled;
-        _sampleSpacingPercent.Enabled = patchControlsEnabled;
-        _flexibility.Enabled = patchControlsEnabled;
-        _adjustTangency.Enabled = patchControlsEnabled;
-        _automaticTrim.Enabled = patchControlsEnabled;
+        var matchControlsEnabled = _plan.Strategy == SurfaceStrategy.MatchSrf;
+        _continuity.Enabled = matchControlsEnabled;
+        _refineMatch.Enabled = matchControlsEnabled;
+        _averageSurfaces.Enabled = matchControlsEnabled;
+        _isoDirection.Enabled = matchControlsEnabled;
+        UpdateCurvatureControlState();
 
         _rebuildTimer.Interval = 0.25;
         _suppressChanges = false;
@@ -167,44 +154,35 @@ internal sealed class SmartSkinPreviewForm : Form
     {
         var heading = new Label
         {
-            Text = $"Result: {_plan.StrategyToken}",
+            Text = _plan.Strategy == SurfaceStrategy.MatchSrf
+                ? "Matched cap from adjacent Brep faces"
+                : $"Result: {_plan.StrategyToken}",
             Wrap = WrapMode.Word,
         };
 
         var routeNote = new Label
         {
-            Text = _plan.Strategy == SurfaceStrategy.Patch
-                ? "Tune the Patch while its cyan preview stays in the viewport."
-                : "This route uses its bounded native construction. Patch controls are disabled.",
+            Text = _plan.Strategy == SurfaceStrategy.MatchSrf
+                ? "Cyan: new cap. Orange: averaged context when Average surfaces is on. Commit is enabled only after measured continuity passes."
+                : "This route uses its bounded native constructor; match controls are disabled.",
             Wrap = WrapMode.Word,
         };
 
-        var reset = new Button
-        {
-            Text = "Reset Balanced",
-            ToolTip = "Restore the bounded default Patch settings.",
-            Enabled = _plan.Strategy == SurfaceStrategy.Patch,
-        };
-        reset.Click += (_, _) => ApplyPreset(CandidatePreset.Balanced, scheduleRebuild: true);
-
-        var patchLayout = new DynamicLayout
+        var matchLayout = new DynamicLayout
         {
             Padding = new Padding(10),
             Spacing = new Size(8, 7),
         };
-        patchLayout.AddRow(new Label { Text = "Preset" }, _preset);
-        patchLayout.AddRow(new Label { Text = "U spans" }, _uSpans);
-        patchLayout.AddRow(new Label { Text = "V spans" }, _vSpans);
-        patchLayout.AddRow(new Label { Text = "Sample spacing" }, _sampleSpacingPercent);
-        patchLayout.AddRow(new Label { Text = "Flexibility" }, _flexibility);
-        patchLayout.AddRow(_adjustTangency);
-        patchLayout.AddRow(_automaticTrim);
-        patchLayout.AddRow(reset);
+        matchLayout.AddRow(new Label { Text = "Continuity" }, _continuity);
+        matchLayout.AddRow(_refineMatch);
+        matchLayout.AddRow(new Label { Text = "Curvature tolerance, %" }, _curvatureTolerance);
+        matchLayout.AddRow(_averageSurfaces);
+        matchLayout.AddRow(new Label { Text = "Isocurve direction" }, _isoDirection);
 
-        var patchGroup = new GroupBox
+        var matchGroup = new GroupBox
         {
-            Text = "Patch result settings",
-            Content = patchLayout,
+            Text = "Surface match",
+            Content = matchLayout,
         };
 
         var appearanceLayout = new DynamicLayout
@@ -222,13 +200,8 @@ internal sealed class SmartSkinPreviewForm : Form
         };
 
         _status.Wrap = WrapMode.Word;
-        _status.Height = 82;
-
-        var instruction = new Label
-        {
-            Text = "Enter / Space / right-click — add one Brep    •    Esc — cancel",
-            Wrap = WrapMode.Word,
-        };
+        _status.Height = 112;
+        _instruction.Wrap = WrapMode.Word;
 
         var layout = new DynamicLayout
         {
@@ -237,35 +210,33 @@ internal sealed class SmartSkinPreviewForm : Form
         };
         layout.AddRow(heading);
         layout.AddRow(routeNote);
-        layout.AddRow(patchGroup);
+        layout.AddRow(matchGroup);
         layout.AddRow(appearanceGroup);
         layout.AddRow(_status);
-        layout.AddRow(instruction);
+        layout.AddRow(_instruction);
         return layout;
     }
 
     private void WireEvents()
     {
-        _preset.SelectedIndexChanged += (_, _) =>
+        _continuity.SelectedIndexChanged += (_, _) =>
         {
             if (_suppressChanges)
             {
                 return;
             }
 
-            var selected = (CandidatePreset)_preset.SelectedIndex;
-            if (selected != CandidatePreset.Custom)
-            {
-                ApplyPreset(selected, scheduleRebuild: true);
-            }
+            UpdateCurvatureControlState();
+            ScheduleRebuild();
         };
-
-        _uSpans.ValueChanged += (_, _) => MarkCustomAndSchedule();
-        _vSpans.ValueChanged += (_, _) => MarkCustomAndSchedule();
-        _sampleSpacingPercent.ValueChanged += (_, _) => MarkCustomAndSchedule();
-        _flexibility.ValueChanged += (_, _) => MarkCustomAndSchedule();
-        _adjustTangency.CheckedChanged += (_, _) => MarkCustomAndSchedule();
-        _automaticTrim.CheckedChanged += (_, _) => MarkCustomAndSchedule();
+        _refineMatch.CheckedChanged += (_, _) =>
+        {
+            UpdateCurvatureControlState();
+            ScheduleRebuild();
+        };
+        _curvatureTolerance.ValueChanged += (_, _) => ScheduleRebuild();
+        _averageSurfaces.CheckedChanged += (_, _) => ScheduleRebuild();
+        _isoDirection.SelectedIndexChanged += (_, _) => ScheduleRebuild();
 
         _previewOpacity.ValueChanged += (_, _) => UpdateAppearance();
         _showWires.CheckedChanged += (_, _) => UpdateAppearance();
@@ -277,13 +248,11 @@ internal sealed class SmartSkinPreviewForm : Form
         };
 
         KeyDown += HandleDecisionKey;
-        _preset.KeyDown += HandleDecisionKey;
-        _uSpans.KeyDown += HandleDecisionKey;
-        _vSpans.KeyDown += HandleDecisionKey;
-        _sampleSpacingPercent.KeyDown += HandleDecisionKey;
-        _flexibility.KeyDown += HandleDecisionKey;
-        _adjustTangency.KeyDown += HandleDecisionKey;
-        _automaticTrim.KeyDown += HandleDecisionKey;
+        _continuity.KeyDown += HandleDecisionKey;
+        _refineMatch.KeyDown += HandleDecisionKey;
+        _curvatureTolerance.KeyDown += HandleDecisionKey;
+        _averageSurfaces.KeyDown += HandleDecisionKey;
+        _isoDirection.KeyDown += HandleDecisionKey;
         _previewOpacity.KeyDown += HandleDecisionKey;
         _showWires.KeyDown += HandleDecisionKey;
 
@@ -297,64 +266,19 @@ internal sealed class SmartSkinPreviewForm : Form
         };
     }
 
-    private static void ConfigureStepper(
-        NumericStepper stepper,
-        double minimum,
-        double maximum,
-        double value,
-        double increment,
-        int decimalPlaces,
-        string toolTip)
+    private void UpdateCurvatureControlState()
     {
-        stepper.MinValue = minimum;
-        stepper.MaxValue = maximum;
-        stepper.Value = value;
-        stepper.Increment = increment;
-        stepper.DecimalPlaces = decimalPlaces;
-        stepper.MaximumDecimalPlaces = Math.Max(decimalPlaces, 3);
-        stepper.Width = 205;
-        stepper.ToolTip = toolTip;
-    }
-
-    private void ApplyPreset(CandidatePreset preset, bool scheduleRebuild)
-    {
-        var appearance = ReadAppearance();
-        var settings = CandidateBuildSettings.CreatePreset(
-            preset,
-            appearance.OpacityPercent,
-            appearance.ShowWires);
-
-        _suppressChanges = true;
-        _preset.SelectedIndex = (int)preset;
-        _uSpans.Value = settings.USpans;
-        _vSpans.Value = settings.VSpans;
-        _sampleSpacingPercent.Value = settings.SampleSpacingScale * 100.0;
-        _flexibility.Value = settings.Flexibility;
-        _adjustTangency.Checked = settings.AdjustTangency;
-        _automaticTrim.Checked = settings.AutomaticTrim;
-        _suppressChanges = false;
-
-        if (scheduleRebuild)
-        {
-            ScheduleRebuild();
-        }
-    }
-
-    private void MarkCustomAndSchedule()
-    {
-        if (_suppressChanges || _plan.Strategy != SurfaceStrategy.Patch)
-        {
-            return;
-        }
-
-        _suppressChanges = true;
-        _preset.SelectedIndex = (int)CandidatePreset.Custom;
-        _suppressChanges = false;
-        ScheduleRebuild();
+        _curvatureTolerance.Enabled = _plan.Strategy == SurfaceStrategy.MatchSrf
+            && _continuity.SelectedIndex == (int)MatchContinuityLevel.Curvature;
     }
 
     private void ScheduleRebuild()
     {
+        if (_suppressChanges || _plan.Strategy != SurfaceStrategy.MatchSrf)
+        {
+            return;
+        }
+
         _rebuildTimer.Stop();
         _status.Text = "UPDATING · waiting for the current setting change…";
         _rebuildTimer.Start();
@@ -363,7 +287,7 @@ internal sealed class SmartSkinPreviewForm : Form
     private void RebuildNow()
     {
         var settings = ReadSettings();
-        _status.Text = "UPDATING · rebuilding one disposable preview…";
+        _status.Text = "UPDATING · rebuilding and measuring one disposable preview…";
         _session.Rebuild(settings);
         RefreshStatus();
     }
@@ -387,13 +311,11 @@ internal sealed class SmartSkinPreviewForm : Form
     {
         var appearance = ReadAppearance();
         return new CandidateBuildSettings(
-            (CandidatePreset)_preset.SelectedIndex,
-            (int)Math.Round(_uSpans.Value),
-            (int)Math.Round(_vSpans.Value),
-            _sampleSpacingPercent.Value / 100.0,
-            _flexibility.Value,
-            _adjustTangency.Checked == true,
-            _automaticTrim.Checked == true,
+            (MatchContinuityLevel)_continuity.SelectedIndex,
+            _refineMatch.Checked == true,
+            _curvatureTolerance.Value,
+            _averageSurfaces.Checked == true,
+            (MatchIsoDirection)_isoDirection.SelectedIndex,
             appearance.OpacityPercent,
             appearance.ShowWires);
     }
@@ -407,23 +329,52 @@ internal sealed class SmartSkinPreviewForm : Form
     {
         var outcome = _session.CurrentOutcome;
         var candidate = _session.Candidate;
+        var settings = _session.CurrentSettings;
         if (outcome?.Success == true && candidate is not null)
         {
-            var settings = _session.CurrentSettings;
-            _status.Text = "READY · one valid in-memory Brep"
+            var metrics = outcome.Metrics;
+            _status.Text = "READY · " + (metrics?.Token ?? "BOUNDED_RESULT")
                 + $"\nFaces {candidate.Faces.Count.ToString(CultureInfo.InvariantCulture)}"
                 + $" · edges {candidate.Edges.Count.ToString(CultureInfo.InvariantCulture)}"
                 + $" · {outcome.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)} ms"
-                + (_plan.Strategy == SurfaceStrategy.Patch
-                    ? $"\n{settings.PresetToken} · {settings.USpans.ToString(CultureInfo.InvariantCulture)}×{settings.VSpans.ToString(CultureInfo.InvariantCulture)} spans"
-                        + $" · sample {settings.SampleSpacingScale.ToString("0.##", CultureInfo.InvariantCulture)}×"
-                        + $" · flexibility {settings.Flexibility.ToString("G4", CultureInfo.InvariantCulture)}"
-                    : string.Empty);
-            return;
+                + (metrics is null
+                    ? string.Empty
+                    : $"\nGap {FormatMetric(metrics.MaximumGap)}"
+                        + $" · sampled normal {FormatMetric(metrics.MaximumNormalAngleDegrees)}°"
+                        + $" · sampled curvature {FormatMetric(metrics.MaximumCurvatureDeviationPercent)}%"
+                        + $" · n={metrics.SampleCount.ToString(CultureInfo.InvariantCulture)}")
+                + (settings.AverageSurfaces
+                    ? $"\nAVERAGE ON · replaces {outcome.ParentObjectCount.ToString(CultureInfo.InvariantCulture)} source Breps with one joined result · first-source attributes"
+                    : _plan.Strategy == SurfaceStrategy.MatchSrf
+                        ? "\nSources unchanged · adds one matched cap"
+                        : "\nSources unchanged · adds one result");
+        }
+        else
+        {
+            _status.Text = "BLOCKED · Enter will not change the document"
+                + (outcome is null ? string.Empty : $"\n{outcome.Code} · {outcome.Message}");
         }
 
-        _status.Text = "BLOCKED · no candidate will be added"
-            + (outcome is null ? string.Empty : $"\n{outcome.Message}");
+        _instruction.Text = settings.AverageSurfaces
+            ? "Enter / Space / right-click — replace sources with averaged joined result    •    Esc — cancel"
+            : _plan.Strategy == SurfaceStrategy.MatchSrf
+                ? "Enter / Space / right-click — add matched cap    •    Esc — cancel"
+                : "Enter / Space / right-click — add result    •    Esc — cancel";
+    }
+
+    private static string FormatMetric(double value)
+    {
+        if (double.IsNaN(value))
+        {
+            return "n/a";
+        }
+
+        if (double.IsPositiveInfinity(value))
+        {
+            return "∞";
+        }
+
+        return value.ToString("G5", CultureInfo.InvariantCulture);
     }
 
     private void RequestAccept()

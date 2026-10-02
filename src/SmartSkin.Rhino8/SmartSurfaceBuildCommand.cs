@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using Rhino;
 using Rhino.Commands;
 using Rhino.DocObjects;
@@ -104,6 +105,20 @@ public sealed class SmartSurfaceBuildCommand : Command
                 return Result.Success;
             }
 
+            if (construction.Strategy == SurfaceStrategy.MatchSrf
+                && RhinoApp.Version.CompareTo(new Version(8, 21)) < 0)
+            {
+                WriteSafeActionLine(
+                    identity,
+                    "BLOCKED",
+                    "P07_RHINO_821_REQUIRED",
+                    construction.StrategyToken,
+                    objectCountBefore,
+                    RhinoDocumentMetrics.ActiveObjectCount(doc),
+                    $" | runtime={RhinoApp.Version} | minimum=8.21");
+                return Result.Success;
+            }
+
             var objectCountBeforeBuild = RhinoDocumentMetrics.ActiveObjectCount(doc);
             if (objectCountBeforeBuild != objectCountBefore)
             {
@@ -111,12 +126,13 @@ public sealed class SmartSurfaceBuildCommand : Command
                 return Result.Failure;
             }
 
-            var initialSettings = CandidateBuildSettings.Balanced;
+            var initialSettings = CandidateBuildSettings.Default;
             using var previewSession = new SmartSkinLivePreviewSession(
                 doc,
                 construction,
                 references,
                 doc.ModelAbsoluteTolerance,
+                doc.ModelAngleToleranceRadians,
                 initialSettings);
             var outcome = previewSession.Rebuild(initialSettings);
 
@@ -129,7 +145,7 @@ public sealed class SmartSurfaceBuildCommand : Command
                 + $"; {outcome.Message}");
 
             if ((!outcome.Success || previewSession.Candidate is null)
-                && construction.Strategy != SurfaceStrategy.Patch)
+                && construction.Strategy != SurfaceStrategy.MatchSrf)
             {
                 WriteSafeActionLine(
                     identity,
@@ -164,6 +180,7 @@ public sealed class SmartSurfaceBuildCommand : Command
                     RhinoDocumentMetrics.ActiveObjectCount(doc),
                     $" | built={(finalOutcome.Success ? "1" : "0")}"
                     + $" | added=0"
+                    + $" | build_code={finalOutcome.Code}"
                     + BoundaryBuildDetails(construction, finalOutcome, separator: " |")
                     + $" | reversed={finalOutcome.ReversedCurveCount.ToString(CultureInfo.InvariantCulture)}"
                     + $" | elapsed_ms={finalOutcome.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)}");
@@ -177,25 +194,25 @@ public sealed class SmartSurfaceBuildCommand : Command
                 return Result.Failure;
             }
 
-            var candidate = previewSession.Candidate;
+            var candidate = finalOutcome.CommitBrep;
             if (candidate is null || !finalOutcome.Success)
             {
-                WriteFailureLine(identity, "P06_ACCEPT_WITHOUT_CANDIDATE", objectCountBefore, objectCountAfterPreview);
+                WriteFailureLine(identity, "P07_ACCEPT_WITHOUT_CANDIDATE", objectCountBefore, objectCountAfterPreview);
                 return Result.Failure;
             }
 
-            var addedId = doc.Objects.AddBrep(candidate);
-            if (addedId == Guid.Empty)
+            if (!CommitResult(doc, finalOutcome, out var addedCount, out var replacedCount, out var commitCode))
             {
-                WriteFailureLine(identity, "P03_ADD_FAILED", objectCountBefore, RhinoDocumentMetrics.ActiveObjectCount(doc));
+                WriteFailureLine(identity, commitCode, objectCountBefore, RhinoDocumentMetrics.ActiveObjectCount(doc));
                 return Result.Failure;
             }
 
             doc.Views.Redraw();
             var objectCountAfter = RhinoDocumentMetrics.ActiveObjectCount(doc);
-            if (objectCountAfter != objectCountBefore + 1)
+            var expectedObjectCount = objectCountBefore + addedCount - replacedCount;
+            if (objectCountAfter != expectedObjectCount)
             {
-                WriteFailureLine(identity, "P03_ADD_COUNT_MISMATCH", objectCountBefore, objectCountAfter);
+                WriteFailureLine(identity, "P07_COMMIT_COUNT_MISMATCH", objectCountBefore, objectCountAfter);
                 return Result.Failure;
             }
 
@@ -205,9 +222,10 @@ public sealed class SmartSurfaceBuildCommand : Command
                 + $" | commit={identity.Commit}"
                 + $" | strategy={construction.StrategyToken}"
                 + " | action=ACCEPTED"
-                + " | code=P06_ACCEPTED"
+                + " | code=P07_ACCEPTED"
                 + " | built=1"
-                + " | added=1"
+                + $" | added={addedCount.ToString(CultureInfo.InvariantCulture)}"
+                + $" | replaced={replacedCount.ToString(CultureInfo.InvariantCulture)}"
                 + BoundaryBuildDetails(construction, finalOutcome, separator: " |")
                 + $" | reversed={finalOutcome.ReversedCurveCount.ToString(CultureInfo.InvariantCulture)}"
                 + $" | elapsed_ms={finalOutcome.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)}"
@@ -247,23 +265,23 @@ public sealed class SmartSurfaceBuildCommand : Command
             {
                 if (form.AcceptRequested)
                 {
-                    return new PreviewDecision(true, Result.Success, "P06_ACCEPTED");
+                    return new PreviewDecision(true, Result.Success, "P07_ACCEPTED");
                 }
 
                 if (form.CancelRequested || !form.Visible)
                 {
-                    return new PreviewDecision(false, Result.Cancel, "P06_PREVIEW_CANCELLED");
+                    return new PreviewDecision(false, Result.Cancel, "P07_PREVIEW_CANCELLED");
                 }
 
                 var getResult = decision.Get();
                 if (form.AcceptRequested)
                 {
-                    return new PreviewDecision(true, Result.Success, "P06_ACCEPTED");
+                    return new PreviewDecision(true, Result.Success, "P07_ACCEPTED");
                 }
 
                 if (form.CancelRequested || !form.Visible)
                 {
-                    return new PreviewDecision(false, Result.Cancel, "P06_PREVIEW_CANCELLED");
+                    return new PreviewDecision(false, Result.Cancel, "P07_PREVIEW_CANCELLED");
                 }
 
                 if (getResult == GetResult.Timeout)
@@ -275,7 +293,7 @@ public sealed class SmartSurfaceBuildCommand : Command
                 {
                     if (form.PrepareForAcceptance())
                     {
-                        return new PreviewDecision(true, Result.Success, "P06_ACCEPTED");
+                        return new PreviewDecision(true, Result.Success, "P07_ACCEPTED");
                     }
 
                     continue;
@@ -285,7 +303,7 @@ public sealed class SmartSurfaceBuildCommand : Command
                 return new PreviewDecision(
                     false,
                     commandResult == Result.Success ? Result.Cancel : commandResult,
-                    "P06_PREVIEW_CANCELLED");
+                    "P07_PREVIEW_CANCELLED");
             }
         }
         finally
@@ -299,22 +317,210 @@ public sealed class SmartSurfaceBuildCommand : Command
         CandidateBuildOutcome outcome,
         string separator)
     {
-        if (!construction.UsesBoundaryTangency)
+        if (!construction.UsesBoundaryMatch)
         {
             return string.Empty;
         }
 
         var settings = outcome.Settings;
+        var metrics = outcome.Metrics;
         return $"{separator} supports={outcome.SupportedEdgeCount.ToString(CultureInfo.InvariantCulture)}"
             + $"{separator} parents={outcome.ParentObjectCount.ToString(CultureInfo.InvariantCulture)}"
-            + $"{separator} preset={settings.PresetToken}"
-            + $"{separator} u_spans={settings.USpans.ToString(CultureInfo.InvariantCulture)}"
-            + $"{separator} v_spans={settings.VSpans.ToString(CultureInfo.InvariantCulture)}"
-            + $"{separator} sample_spacing_scale={settings.SampleSpacingScale.ToString("G4", CultureInfo.InvariantCulture)}"
-            + $"{separator} flexibility={settings.Flexibility.ToString("G4", CultureInfo.InvariantCulture)}"
-            + $"{separator} continuity={(settings.AdjustTangency ? "G1_REQUESTED" : "G0_ONLY")}"
-            + $"{separator} trim={(settings.AutomaticTrim ? "ON" : "OFF")}"
-            + $"{separator} point_spacing={outcome.PointSpacing.ToString("G6", CultureInfo.InvariantCulture)}";
+            + $"{separator} proved_target_edges={outcome.JoinedSeamCount.ToString(CultureInfo.InvariantCulture)}"
+            + $"{separator} continuity={settings.ContinuityToken}"
+            + $"{separator} verified={(metrics?.Token ?? "NOT_MEASURED")}"
+            + $"{separator} max_gap={FormatMetric(metrics?.MaximumGap)}"
+            + $"{separator} sampled_max_normal_deg={FormatMetric(metrics?.MaximumNormalAngleDegrees)}"
+            + $"{separator} sampled_max_curvature_pct={FormatMetric(metrics?.MaximumCurvatureDeviationPercent)}"
+            + $"{separator} samples={(metrics?.SampleCount ?? 0).ToString(CultureInfo.InvariantCulture)}"
+            + $"{separator} refine={(settings.RefineMatch ? "ON" : "OFF")}"
+            + $"{separator} curvature_tolerance_pct={settings.CurvatureTolerancePercent.ToString("G4", CultureInfo.InvariantCulture)}"
+            + $"{separator} average={(settings.AverageSurfaces ? "ON" : "OFF")}"
+            + $"{separator} reverse_match={(outcome.ReverseMatchDirection ? "ON" : "OFF")}"
+            + $"{separator} reverse_average_target={(outcome.ReverseAverageTargetDirection ? "ON" : "OFF")}"
+            + $"{separator} attribute_policy={(settings.AverageSurfaces ? "FIRST_PARENT" : "SOURCES_PRESERVED")}"
+            + $"{separator} iso={settings.IsoDirection.ToString().ToUpperInvariant()}";
+    }
+
+    private static bool CommitResult(
+        RhinoDoc doc,
+        CandidateBuildOutcome outcome,
+        out int addedCount,
+        out int replacedCount,
+        out string failureCode)
+    {
+        addedCount = 0;
+        replacedCount = 0;
+        failureCode = "P07_COMMIT_FAILED";
+        var commitBrep = outcome.CommitBrep;
+        if (!outcome.Success || commitBrep is null)
+        {
+            failureCode = "P07_COMMIT_WITHOUT_RESULT";
+            return false;
+        }
+
+        if (!outcome.ReplacesSources)
+        {
+            var addedId = doc.Objects.AddBrep(commitBrep);
+            if (addedId == Guid.Empty)
+            {
+                failureCode = "P07_ADD_FAILED";
+                return false;
+            }
+
+            addedCount = 1;
+            return true;
+        }
+
+        if (outcome.ParentObjectIds.Count == 0)
+        {
+            failureCode = "P07_AVERAGE_WITHOUT_PARENTS";
+            return false;
+        }
+
+        if (!doc.UndoRecordingEnabled
+            || !doc.UndoRecordingIsActive
+            || doc.CurrentUndoRecordSerialNumber == 0)
+        {
+            failureCode = "P07_AVERAGE_UNDO_UNAVAILABLE";
+            return false;
+        }
+
+        var undoRecordSerial = doc.CurrentUndoRecordSerialNumber;
+        var activeCountBeforeCommit = RhinoDocumentMetrics.ActiveObjectCount(doc);
+        var parents = new List<RhinoObject>(outcome.ParentObjectIds.Count);
+        var uniqueParentIds = new HashSet<Guid>();
+        foreach (var parentId in outcome.ParentObjectIds)
+        {
+            if (!uniqueParentIds.Add(parentId))
+            {
+                failureCode = "P07_AVERAGE_PARENT_DUPLICATE";
+                return false;
+            }
+
+            var parent = doc.Objects.FindId(parentId);
+            if (parent is null || parent.IsDeleted)
+            {
+                failureCode = "P07_AVERAGE_PARENT_CHANGED";
+                return false;
+            }
+
+            if (!parent.IsDeletable || parent.IsReference || parent.IsLocked)
+            {
+                failureCode = "P07_AVERAGE_PARENT_NOT_EDITABLE";
+                return false;
+            }
+
+            parents.Add(parent);
+        }
+
+        using var attributes = parents[0].Attributes.Duplicate();
+        var resultId = doc.Objects.AddBrep(commitBrep, attributes);
+        if (resultId == Guid.Empty)
+        {
+            failureCode = "P07_AVERAGE_ADD_FAILED";
+            return false;
+        }
+
+        addedCount = 1;
+        var deletedParents = new List<RhinoObject>(parents.Count);
+        foreach (var parent in parents)
+        {
+            if (doc.Objects.Delete(parent, quiet: true))
+            {
+                deletedParents.Add(parent);
+                continue;
+            }
+
+            var rollbackComplete = TryRollbackAverageResult(
+                doc,
+                resultId,
+                deletedParents,
+                outcome.ParentObjectIds,
+                activeCountBeforeCommit);
+            addedCount = rollbackComplete ? 0 : 1;
+            failureCode = rollbackComplete
+                ? "P07_AVERAGE_DELETE_FAILED"
+                : "P07_AVERAGE_ROLLBACK_FAILED";
+            return false;
+        }
+
+        var committedResult = doc.Objects.FindId(resultId);
+        var everyParentInactive = outcome.ParentObjectIds.All(parentId =>
+        {
+            var source = doc.Objects.FindId(parentId);
+            return source is null || source.IsDeleted;
+        });
+        var expectedActiveCount = activeCountBeforeCommit + 1 - parents.Count;
+        var commitPostcondition = committedResult is not null
+            && !committedResult.IsDeleted
+            && everyParentInactive
+            && RhinoDocumentMetrics.ActiveObjectCount(doc) == expectedActiveCount
+            && doc.UndoRecordingIsActive
+            && doc.CurrentUndoRecordSerialNumber == undoRecordSerial;
+        if (!commitPostcondition)
+        {
+            var rollbackComplete = TryRollbackAverageResult(
+                doc,
+                resultId,
+                deletedParents,
+                outcome.ParentObjectIds,
+                activeCountBeforeCommit);
+            addedCount = rollbackComplete ? 0 : 1;
+            failureCode = rollbackComplete
+                ? "P07_AVERAGE_COMMIT_POSTCONDITION_FAILED"
+                : "P07_AVERAGE_ROLLBACK_FAILED";
+            return false;
+        }
+
+        replacedCount = deletedParents.Count;
+        return true;
+    }
+
+    private static bool TryRollbackAverageResult(
+        RhinoDoc doc,
+        Guid resultId,
+        IReadOnlyList<RhinoObject> deletedParents,
+        IReadOnlyList<Guid> parentObjectIds,
+        int expectedActiveCount)
+    {
+        var resultObject = doc.Objects.FindId(resultId);
+        var resultRemoved = resultObject is null
+            || resultObject.IsDeleted
+            || doc.Objects.Delete(resultId, quiet: true);
+        var everyParentRestored = true;
+        foreach (var deletedParent in deletedParents)
+        {
+            everyParentRestored &= doc.Objects.Undelete(deletedParent);
+        }
+
+        resultObject = doc.Objects.FindId(resultId);
+        var resultInactive = resultObject is null || resultObject.IsDeleted;
+        var everyParentActive = parentObjectIds.All(parentId =>
+        {
+            var restored = doc.Objects.FindId(parentId);
+            return restored is not null && !restored.IsDeleted;
+        });
+        return resultRemoved
+            && everyParentRestored
+            && resultInactive
+            && everyParentActive
+            && RhinoDocumentMetrics.ActiveObjectCount(doc) == expectedActiveCount;
+    }
+
+    private static string FormatMetric(double? value)
+    {
+        if (!value.HasValue || double.IsNaN(value.Value))
+        {
+            return "n/a";
+        }
+
+        if (double.IsPositiveInfinity(value.Value))
+        {
+            return "inf";
+        }
+
+        return value.Value.ToString("G6", CultureInfo.InvariantCulture);
     }
 
     private static void WritePlan(
@@ -329,7 +535,7 @@ public sealed class SmartSurfaceBuildCommand : Command
         RhinoApp.WriteLine($"Version: {identity.Version}");
         RhinoApp.WriteLine($"Commit: {identity.Commit}");
         RhinoApp.WriteLine($"Units: {doc.ModelUnitSystem}");
-        RhinoApp.WriteLine("Mode: one live settings window and one in-memory preview; source geometry is unchanged; Enter/Space/right-click adds one Brep; Esc cancels.");
+        RhinoApp.WriteLine("Mode: one live settings window and measured in-memory preview; Enter/Space/right-click commits; Esc cancels; Average surfaces explicitly replaces owning Breps.");
         RhinoApp.WriteLine(
             $"Preflight: {preflight.Status.ToString().ToUpperInvariant()}"
             + $"; warnings={preflight.WarningCount.ToString(CultureInfo.InvariantCulture)}"

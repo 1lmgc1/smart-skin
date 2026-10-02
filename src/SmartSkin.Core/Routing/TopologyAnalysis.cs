@@ -142,6 +142,7 @@ internal static class RoutingTokens
             SurfaceStrategy.PlanarSrf => "PLANAR_SRF",
             SurfaceStrategy.EdgeSrf => "EDGE_SRF",
             SurfaceStrategy.Loft => "LOFT",
+            SurfaceStrategy.MatchSrf => "MATCH_SRF",
             SurfaceStrategy.Patch => "PATCH",
             SurfaceStrategy.NetworkSrf => "NETWORK_SRF",
             _ => throw new ArgumentOutOfRangeException(nameof(strategy))
