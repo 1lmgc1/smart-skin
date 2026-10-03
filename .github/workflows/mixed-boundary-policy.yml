@@ -1,0 +1,39 @@
+name: mixed-boundary-policy-p08b
+
+on:
+  push:
+    branches: [p08-mixed-boundary]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  policy-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Released plugin source, identity and install path unchanged
+        run: git diff --exit-code a9b8281f9475fb29d38839614b1781ff21b26677 HEAD -- src tests Directory.Build.props VERSION scripts .github/workflows/build.yml
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Compile standalone policy model
+        run: dotnet build experiments/P08B.MixedBoundary/PolicyChecks.csproj -c Release
+      - name: Synthetic policy regressions (no Rhino geometry)
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p policy-results
+          dotnet run --project experiments/P08B.MixedBoundary/PolicyChecks.csproj -c Release --no-build | tee policy-results/policy-tests.txt
+          printf 'commit=%s\nscope=POLICY_ONLY\nrhino_native=NOT_RUN\nplugin_integration=NOT_IMPLEMENTED\ngeometry=NOT_VERIFIED\n' "$GITHUB_SHA" > policy-results/verification-scope.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: SmartSkin-P08B-policy-report-${{ github.run_number }}-${{ github.sha }}
+          path: policy-results/*
+          if-no-files-found: warn
+          retention-days: 30

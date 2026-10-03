@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>SmartSkin.P08B.PolicyChecks</AssemblyName>
+    <Version>0.1.0</Version>
+    <InformationalVersion>P08B.1-policy-experiment-not-a-plugin</InformationalVersion>
+  </PropertyGroup>
+</Project>
