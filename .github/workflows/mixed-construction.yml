@@ -1,0 +1,56 @@
+name: mixed-construction-p08b2
+on:
+  push:
+    branches: [p08-mixed-boundary]
+    paths: ['experiments/P08B.Construction/**', '.github/workflows/mixed-construction.yml', 'docs/P08B2_CONSTRUCTION.md']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  construction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Released plugin unchanged
+        run: git diff --exit-code a9b8281f9475fb29d38839614b1781ff21b26677 HEAD -- src tests Directory.Build.props VERSION scripts .github/workflows/build.yml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test-only dependencies (not required in user's Rhino)
+        run: python -m pip install numpy==2.2.6 scipy==1.15.3 rhino3dm==8.17.0
+      - name: Constructive geometry, independent numerical references, helpers and I/O
+        run: |
+          set -o pipefail
+          mkdir -p construction-artifact
+          PYTHONPATH=experiments/P08B.Construction python -m unittest discover -s experiments/P08B.Construction -p 'test_*.py' -v 2>&1 | tee construction-artifact/tests.txt
+      - name: Native OpenNURBS geometry creation and 3dm roundtrip (not Rhino Join)
+        run: |
+          set -o pipefail
+          python experiments/P08B.Construction/verify_opennurbs.py 2>&1 | tee construction-artifact/opennurbs.txt
+          test -s construction-artifact/opennurbs-results.json
+          test -s construction-artifact/P08B2_synthetic_results.3dm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Compile against RhinoCommon 8.21 public APIs only
+        run: dotnet build experiments/P08B.Construction/ApiCheck.csproj -c Release
+      - name: Bundle one user script and state limitations
+        run: |
+          python experiments/P08B.Construction/bundle.py
+          python -m py_compile construction-artifact/SmartSkin_MixedBoundary_Prototype.py
+          cp docs/P08B2_CONSTRUCTION.md construction-artifact/
+          python - <<'PY'
+          import pathlib,os,hashlib
+          p=pathlib.Path('construction-artifact/SmartSkin_MixedBoundary_Prototype.py')
+          pathlib.Path('construction-artifact/verification-scope.txt').write_text('experiment=P08B.2\ncommit='+os.environ['GITHUB_SHA']+'\nscript_sha256='+hashlib.sha256(p.read_bytes()).hexdigest()+'\ngeometry=synthetic_BSpline_construction_and_OpenNURBS_executed\nrhino_api=compile_only\nrhino_join_and_UI=NOT_RUN\nprivate_hole=NOT_VERIFIED\nplugin_integration=NOT_IMPLEMENTED\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: SmartSkin-P08B2-construction-${{ github.run_number }}-${{ github.sha }}
+          path: construction-artifact/*
+          if-no-files-found: error
+          retention-days: 30

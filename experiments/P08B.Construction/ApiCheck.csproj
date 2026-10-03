@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework><EnableDefaultCompileItems>false</EnableDefaultCompileItems><GenerateAssemblyInfo>false</GenerateAssemblyInfo></PropertyGroup>
+  <ItemGroup><Compile Include="RhinoApiProbe.cs"/><PackageReference Include="RhinoCommon" Version="8.21.25188.17001" ExcludeAssets="runtime"/></ItemGroup>
+</Project>
