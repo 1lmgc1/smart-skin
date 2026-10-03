@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Rhino;
 using Rhino.DocObjects;
 using Rhino.Geometry;
 using SmartSkin.Core.Construction;
+using SmartSkin.Core.Routing;
 
 namespace SmartSkin.Rhino8;
 
@@ -21,63 +23,65 @@ internal sealed class SmartSkinLivePreviewSession : IDisposable
     private volatile bool _cancellationRequested;
     private bool _disposed;
 
-    public SmartSkinLivePreviewSession(
-        RhinoDoc document,
-        CandidateConstructionPlan plan,
-        IReadOnlyList<ObjRef> references,
-        double absoluteTolerance,
-        double angleToleranceRadians,
-        CandidateBuildSettings initialSettings)
+    public SmartSkinLivePreviewSession(RhinoDoc document, CandidateConstructionPlan plan,
+        IReadOnlyList<ObjRef> references, double absoluteTolerance,
+        double angleToleranceRadians, CandidateBuildSettings initialSettings)
     {
         _document = document ?? throw new ArgumentNullException(nameof(document));
         _plan = plan ?? throw new ArgumentNullException(nameof(plan));
-        _references = references is null
-            ? throw new ArgumentNullException(nameof(references))
-            : new List<ObjRef>(references);
+        _references = references is null ? throw new ArgumentNullException(nameof(references)) : new List<ObjRef>(references);
         _absoluteTolerance = absoluteTolerance;
         _angleToleranceRadians = angleToleranceRadians;
         _currentSettings = initialSettings ?? throw new ArgumentNullException(nameof(initialSettings));
-        _conduit = new CandidatePreviewConduit(
-            initialSettings.PreviewOpacityPercent,
-            initialSettings.ShowWires)
+        if (plan.Strategy == SurfaceStrategy.MatchSrf)
         {
-            Enabled = true,
-        };
+            var natural = _references.Count(reference => reference.Edge() is BrepEdge edge
+                && BoundaryMatchVerifier.IsAverageTargetEligible(edge));
+            AverageEligible = natural == _references.Count && natural > 0;
+            AverageNote = AverageEligible
+                ? "Average changes adjacent Breps; attributes and Join proof are checked before commit."
+                : "Average unavailable: natural target edges " + natural + "/" + _references.Count
+                    + ". Trimmed targets support one-sided matching only.";
+            RhinoApp.WriteLine("SMARTSKIN_P07F1_INPUT | supports=" + _references.Count
+                + " | average_eligible=" + (AverageEligible ? "YES" : "NO")
+                + " | natural_targets=" + natural + "/" + _references.Count);
+        }
+        _conduit = new CandidatePreviewConduit(initialSettings.PreviewOpacityPercent, initialSettings.ShowWires) { Enabled = true };
         RhinoApp.EscapeKeyPressed += HandleEscapeKeyPressed;
     }
 
+    public bool AverageEligible { get; }
+    public string AverageNote { get; } = "Average is unavailable on this route.";
     public CandidateBuildOutcome? CurrentOutcome => _currentOutcome;
-
     public CandidateBuildSettings CurrentSettings => _currentSettings;
-
-    public Brep? Candidate => _currentOutcome?.Success == true
-        ? _currentOutcome.Candidate
-        : null;
-
+    public Brep? Candidate => _currentOutcome?.Success == true ? _currentOutcome.Candidate : null;
     public bool HasCandidate => Candidate is not null;
 
     public CandidateBuildOutcome Rebuild(CandidateBuildSettings settings)
     {
         ThrowIfDisposed();
-        if (settings is null)
-        {
-            throw new ArgumentNullException(nameof(settings));
-        }
-
+        if (settings is null) throw new ArgumentNullException(nameof(settings));
         _cancellationRequested = false;
-        var next = _builder.Build(
-            _plan,
-            _references,
-            _absoluteTolerance,
-            _angleToleranceRadians,
-            settings,
-            () => _cancellationRequested);
+        CandidateBuildOutcome next;
+        if (_plan.Strategy == SurfaceStrategy.MatchSrf && !BoundaryVerifierSelfTests.EnsurePassed())
+        {
+            next = CandidateBuildOutcome.Failed("P07F1_VALIDATOR_SELFTEST_FAILED",
+                "Native validator regression failed: " + BoundaryVerifierSelfTests.LastFailure, 0, 0, settings);
+        }
+        else if (_plan.Strategy == SurfaceStrategy.MatchSrf && settings.AverageSurfaces && !AverageEligible)
+        {
+            next = CandidateBuildOutcome.Failed(CandidateBuildCodes.AverageRequiresUntrimmedTarget,
+                AverageNote, 0, 0, settings, _references.Count);
+        }
+        else
+        {
+            next = _builder.Build(_plan, _references, _absoluteTolerance, _angleToleranceRadians,
+                settings, () => _cancellationRequested);
+        }
         var previous = _currentOutcome;
         _currentOutcome = next;
         _currentSettings = settings;
-        _conduit.SetCandidates(
-            next.Success ? next.Candidate : null,
-            next.Success ? next.AveragedContext : null);
+        _conduit.SetCandidates(next.Success ? next.Candidate : null, next.Success ? next.AveragedContext : null);
         _conduit.SetAppearance(settings.PreviewOpacityPercent, settings.ShowWires);
         previous?.Dispose();
         _document.Views.Redraw();
@@ -87,11 +91,7 @@ internal sealed class SmartSkinLivePreviewSession : IDisposable
     public void UpdateAppearance(CandidateBuildSettings settings)
     {
         ThrowIfDisposed();
-        if (settings is null)
-        {
-            throw new ArgumentNullException(nameof(settings));
-        }
-
+        if (settings is null) throw new ArgumentNullException(nameof(settings));
         _currentSettings = settings;
         _conduit.SetAppearance(settings.PreviewOpacityPercent, settings.ShowWires);
         _document.Views.Redraw();
@@ -99,11 +99,7 @@ internal sealed class SmartSkinLivePreviewSession : IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
+        if (_disposed) return;
         _disposed = true;
         RhinoApp.EscapeKeyPressed -= HandleEscapeKeyPressed;
         _conduit.Dispose();
@@ -114,14 +110,8 @@ internal sealed class SmartSkinLivePreviewSession : IDisposable
 
     private void ThrowIfDisposed()
     {
-        if (_disposed)
-        {
-            throw new ObjectDisposedException(nameof(SmartSkinLivePreviewSession));
-        }
+        if (_disposed) throw new ObjectDisposedException(nameof(SmartSkinLivePreviewSession));
     }
 
-    private void HandleEscapeKeyPressed(object? sender, EventArgs eventArgs)
-    {
-        _cancellationRequested = true;
-    }
+    private void HandleEscapeKeyPressed(object? sender, EventArgs eventArgs) => _cancellationRequested = true;
 }

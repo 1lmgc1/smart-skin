@@ -11,21 +11,8 @@ namespace SmartSkin.Rhino8;
 
 internal sealed class SmartSkinPreviewForm : Form
 {
-    private static readonly string[] ContinuityNames =
-    {
-        "Position (G0)",
-        "Tangency (G1)",
-        "Curvature (G2)",
-    };
-
-    private static readonly string[] IsoDirectionNames =
-    {
-        "Automatic",
-        "Match target",
-        "Perpendicular",
-        "Preserve seed",
-    };
-
+    private static readonly string[] ContinuityNames = { "Position (G0)", "Tangency (G1)", "Curvature (G2)" };
+    private static readonly string[] IsoDirectionNames = { "Automatic", "Match target", "Perpendicular", "Preserve seed" };
     private readonly CandidateConstructionPlan _plan;
     private readonly SmartSkinLivePreviewSession _session;
     private readonly DropDown _continuity = new();
@@ -42,22 +29,13 @@ internal sealed class SmartSkinPreviewForm : Form
     private bool _suppressChanges;
     private bool _closingForDecision;
 
-    public SmartSkinPreviewForm(
-        RhinoDoc document,
-        CandidateConstructionPlan plan,
-        SmartSkinLivePreviewSession session)
+    public SmartSkinPreviewForm(RhinoDoc document, CandidateConstructionPlan plan, SmartSkinLivePreviewSession session)
     {
         _plan = plan ?? throw new ArgumentNullException(nameof(plan));
         _session = session ?? throw new ArgumentNullException(nameof(session));
-        if (document is null)
-        {
-            throw new ArgumentNullException(nameof(document));
-        }
-
-        Title = _plan.Strategy == SurfaceStrategy.MatchSrf
-            ? "Smart Skin — matched result"
-            : "Smart Skin — result preview";
-        ClientSize = new Size(470, 560);
+        if (document is null) throw new ArgumentNullException(nameof(document));
+        Title = _plan.Strategy == SurfaceStrategy.MatchSrf ? "Smart Skin — matched result" : "Smart Skin — result preview";
+        ClientSize = new Size(510, 640);
         Resizable = false;
         Maximizable = false;
         Minimizable = false;
@@ -65,7 +43,6 @@ internal sealed class SmartSkinPreviewForm : Form
         CanFocus = true;
         Owner = RhinoEtoApp.MainWindowForDocument(document);
         this.UseRhinoStyle();
-
         ConfigureControls(session.CurrentSettings);
         Content = BuildLayout();
         WireEvents();
@@ -73,17 +50,11 @@ internal sealed class SmartSkinPreviewForm : Form
     }
 
     public bool AcceptRequested { get; private set; }
-
     public bool CancelRequested { get; private set; }
 
     public bool PrepareForAcceptance()
     {
-        if (_rebuildTimer.Started)
-        {
-            _rebuildTimer.Stop();
-            RebuildNow();
-        }
-
+        if (_rebuildTimer.Started) { _rebuildTimer.Stop(); RebuildNow(); }
         return _session.HasCandidate;
     }
 
@@ -91,25 +62,19 @@ internal sealed class SmartSkinPreviewForm : Form
     {
         _closingForDecision = true;
         _rebuildTimer.Stop();
-        if (Visible)
-        {
-            Close();
-        }
+        if (Visible) Close();
     }
 
     private void ConfigureControls(CandidateBuildSettings settings)
     {
         _suppressChanges = true;
-
         _continuity.DataStore = ContinuityNames;
         _continuity.SelectedIndex = (int)settings.Continuity;
         _continuity.Width = 225;
-        _continuity.ToolTip = "Match position, tangent direction, or radius of curvature to the adjacent Brep faces.";
-
+        _continuity.ToolTip = "Required continuity to the adjacent Brep faces; never silently downgraded.";
         _refineMatch.Text = "Refine match to document tolerances";
         _refineMatch.Checked = settings.RefineMatch;
-        _refineMatch.ToolTip = "Allow Rhino to add knot rows until the selected continuity is within tolerance.";
-
+        _refineMatch.ToolTip = "Ask Rhino to refine the native match. The independent verifier still must pass.";
         _curvatureTolerance.MinValue = CandidateBuildSettings.MinimumCurvatureTolerancePercent;
         _curvatureTolerance.MaxValue = CandidateBuildSettings.MaximumCurvatureTolerancePercent;
         _curvatureTolerance.Value = settings.CurvatureTolerancePercent;
@@ -117,97 +82,59 @@ internal sealed class SmartSkinPreviewForm : Form
         _curvatureTolerance.DecimalPlaces = 1;
         _curvatureTolerance.MaximumDecimalPlaces = 2;
         _curvatureTolerance.Width = 225;
-        _curvatureTolerance.ToolTip = "Maximum radius-of-curvature deviation used by Refine and by commit verification.";
-
+        _curvatureTolerance.ToolTip = "Maximum sampled cross-boundary radius-of-curvature deviation, in percent.";
         _averageSurfaces.Text = "Average surfaces (changes adjacent Breps)";
         _averageSurfaces.Checked = settings.AverageSurfaces;
-        _averageSurfaces.ToolTip = "For untrimmed target surfaces, move both sides to an intermediate shape. Enter replaces the selected owning Breps only after every seam joins; the result inherits the first source object's attributes.";
-
+        _averageSurfaces.ToolTip = _session.AverageNote;
         _isoDirection.DataStore = IsoDirectionNames;
         _isoDirection.SelectedIndex = (int)settings.IsoDirection;
         _isoDirection.Width = 225;
         _isoDirection.ToolTip = "Control how the matched cap isocurves meet the target boundary.";
-
         _previewOpacity.MinValue = CandidateBuildSettings.MinimumPreviewOpacity;
         _previewOpacity.MaxValue = CandidateBuildSettings.MaximumPreviewOpacity;
         _previewOpacity.Value = settings.PreviewOpacityPercent;
         _previewOpacity.TickFrequency = 5;
         _previewOpacity.SnapToTick = true;
         _previewOpacity.Width = 225;
-        _previewOpacityValue.Text = $"{settings.PreviewOpacityPercent.ToString(CultureInfo.InvariantCulture)}%";
-
+        _previewOpacityValue.Text = settings.PreviewOpacityPercent.ToString(CultureInfo.InvariantCulture) + "%";
         _showWires.Text = "Show preview wires";
         _showWires.Checked = settings.ShowWires;
-
-        var matchControlsEnabled = _plan.Strategy == SurfaceStrategy.MatchSrf;
-        _continuity.Enabled = matchControlsEnabled;
-        _refineMatch.Enabled = matchControlsEnabled;
-        _averageSurfaces.Enabled = matchControlsEnabled;
-        _isoDirection.Enabled = matchControlsEnabled;
+        var match = _plan.Strategy == SurfaceStrategy.MatchSrf;
+        _continuity.Enabled = match;
+        _refineMatch.Enabled = match;
+        _averageSurfaces.Enabled = match && _session.AverageEligible;
+        _isoDirection.Enabled = match;
         UpdateCurvatureControlState();
-
         _rebuildTimer.Interval = 0.25;
         _suppressChanges = false;
     }
 
     private Control BuildLayout()
     {
-        var heading = new Label
-        {
-            Text = _plan.Strategy == SurfaceStrategy.MatchSrf
-                ? "Matched cap from adjacent Brep faces"
-                : $"Result: {_plan.StrategyToken}",
-            Wrap = WrapMode.Word,
-        };
-
+        var match = _plan.Strategy == SurfaceStrategy.MatchSrf;
+        var heading = new Label { Text = match ? "Matched cap from adjacent Brep faces" : "Result: " + _plan.StrategyToken, Wrap = WrapMode.Word };
         var routeNote = new Label
         {
-            Text = _plan.Strategy == SurfaceStrategy.MatchSrf
-                ? "Cyan: new cap. Orange: averaged context when Average surfaces is on. Commit is enabled only after measured continuity passes."
+            Text = match ? "Cyan: new cap. Orange: averaged context. Commit requires measured continuity and a closed Join proof."
                 : "This route uses its bounded native constructor; match controls are disabled.",
             Wrap = WrapMode.Word,
         };
-
-        var matchLayout = new DynamicLayout
-        {
-            Padding = new Padding(10),
-            Spacing = new Size(8, 7),
-        };
+        var matchLayout = new DynamicLayout { Padding = new Padding(10), Spacing = new Size(8, 7) };
         matchLayout.AddRow(new Label { Text = "Continuity" }, _continuity);
         matchLayout.AddRow(_refineMatch);
         matchLayout.AddRow(new Label { Text = "Curvature tolerance, %" }, _curvatureTolerance);
         matchLayout.AddRow(_averageSurfaces);
+        if (match) matchLayout.AddRow(new Label { Text = _session.AverageNote, Wrap = WrapMode.Word });
         matchLayout.AddRow(new Label { Text = "Isocurve direction" }, _isoDirection);
-
-        var matchGroup = new GroupBox
-        {
-            Text = "Surface match",
-            Content = matchLayout,
-        };
-
-        var appearanceLayout = new DynamicLayout
-        {
-            Padding = new Padding(10),
-            Spacing = new Size(8, 7),
-        };
-        appearanceLayout.AddRow(new Label { Text = "Opacity" }, _previewOpacity, _previewOpacityValue);
-        appearanceLayout.AddRow(_showWires);
-
-        var appearanceGroup = new GroupBox
-        {
-            Text = "Preview",
-            Content = appearanceLayout,
-        };
-
+        var matchGroup = new GroupBox { Text = "Surface match", Content = matchLayout };
+        var appearance = new DynamicLayout { Padding = new Padding(10), Spacing = new Size(8, 7) };
+        appearance.AddRow(new Label { Text = "Opacity" }, _previewOpacity, _previewOpacityValue);
+        appearance.AddRow(_showWires);
+        var appearanceGroup = new GroupBox { Text = "Preview", Content = appearance };
         _status.Wrap = WrapMode.Word;
-        _status.Height = 112;
+        _status.Height = 155;
         _instruction.Wrap = WrapMode.Word;
-
-        var layout = new DynamicLayout
-        {
-            Padding = new Padding(14),
-            Spacing = new Size(8, 9),
-        };
+        var layout = new DynamicLayout { Padding = new Padding(14), Spacing = new Size(8, 9) };
         layout.AddRow(heading);
         layout.AddRow(routeNote);
         layout.AddRow(matchGroup);
@@ -221,32 +148,17 @@ internal sealed class SmartSkinPreviewForm : Form
     {
         _continuity.SelectedIndexChanged += (_, _) =>
         {
-            if (_suppressChanges)
-            {
-                return;
-            }
-
+            if (_suppressChanges) return;
             UpdateCurvatureControlState();
             ScheduleRebuild();
         };
-        _refineMatch.CheckedChanged += (_, _) =>
-        {
-            UpdateCurvatureControlState();
-            ScheduleRebuild();
-        };
+        _refineMatch.CheckedChanged += (_, _) => { UpdateCurvatureControlState(); ScheduleRebuild(); };
         _curvatureTolerance.ValueChanged += (_, _) => ScheduleRebuild();
         _averageSurfaces.CheckedChanged += (_, _) => ScheduleRebuild();
         _isoDirection.SelectedIndexChanged += (_, _) => ScheduleRebuild();
-
         _previewOpacity.ValueChanged += (_, _) => UpdateAppearance();
         _showWires.CheckedChanged += (_, _) => UpdateAppearance();
-
-        _rebuildTimer.Elapsed += (_, _) =>
-        {
-            _rebuildTimer.Stop();
-            RebuildNow();
-        };
-
+        _rebuildTimer.Elapsed += (_, _) => { _rebuildTimer.Stop(); RebuildNow(); };
         KeyDown += HandleDecisionKey;
         _continuity.KeyDown += HandleDecisionKey;
         _refineMatch.KeyDown += HandleDecisionKey;
@@ -255,30 +167,19 @@ internal sealed class SmartSkinPreviewForm : Form
         _isoDirection.KeyDown += HandleDecisionKey;
         _previewOpacity.KeyDown += HandleDecisionKey;
         _showWires.KeyDown += HandleDecisionKey;
-
         Closing += (_, _) =>
         {
             _rebuildTimer.Stop();
-            if (!_closingForDecision && !AcceptRequested)
-            {
-                CancelRequested = true;
-            }
+            if (!_closingForDecision && !AcceptRequested) CancelRequested = true;
         };
     }
 
-    private void UpdateCurvatureControlState()
-    {
-        _curvatureTolerance.Enabled = _plan.Strategy == SurfaceStrategy.MatchSrf
-            && _continuity.SelectedIndex == (int)MatchContinuityLevel.Curvature;
-    }
+    private void UpdateCurvatureControlState() => _curvatureTolerance.Enabled = _plan.Strategy == SurfaceStrategy.MatchSrf
+        && _continuity.SelectedIndex == (int)MatchContinuityLevel.Curvature;
 
     private void ScheduleRebuild()
     {
-        if (_suppressChanges || _plan.Strategy != SurfaceStrategy.MatchSrf)
-        {
-            return;
-        }
-
+        if (_suppressChanges || _plan.Strategy != SurfaceStrategy.MatchSrf) return;
         _rebuildTimer.Stop();
         _status.Text = "UPDATING · waiting for the current setting change…";
         _rebuildTimer.Start();
@@ -286,110 +187,59 @@ internal sealed class SmartSkinPreviewForm : Form
 
     private void RebuildNow()
     {
-        var settings = ReadSettings();
         _status.Text = "UPDATING · rebuilding and measuring one disposable preview…";
-        _session.Rebuild(settings);
+        _session.Rebuild(ReadSettings());
         RefreshStatus();
     }
 
     private void UpdateAppearance()
     {
-        if (_suppressChanges)
-        {
-            return;
-        }
-
-        var appearance = ReadAppearance();
-        _previewOpacityValue.Text = $"{appearance.OpacityPercent.ToString(CultureInfo.InvariantCulture)}%";
-        _session.UpdateAppearance(
-            _session.CurrentSettings.WithAppearance(
-                appearance.OpacityPercent,
-                appearance.ShowWires));
+        if (_suppressChanges) return;
+        _previewOpacityValue.Text = _previewOpacity.Value.ToString(CultureInfo.InvariantCulture) + "%";
+        _session.UpdateAppearance(_session.CurrentSettings.WithAppearance(_previewOpacity.Value, _showWires.Checked == true));
     }
 
-    private CandidateBuildSettings ReadSettings()
-    {
-        var appearance = ReadAppearance();
-        return new CandidateBuildSettings(
-            (MatchContinuityLevel)_continuity.SelectedIndex,
-            _refineMatch.Checked == true,
-            _curvatureTolerance.Value,
-            _averageSurfaces.Checked == true,
-            (MatchIsoDirection)_isoDirection.SelectedIndex,
-            appearance.OpacityPercent,
-            appearance.ShowWires);
-    }
-
-    private (int OpacityPercent, bool ShowWires) ReadAppearance()
-    {
-        return (_previewOpacity.Value, _showWires.Checked == true);
-    }
+    private CandidateBuildSettings ReadSettings() => new(
+        (MatchContinuityLevel)_continuity.SelectedIndex, _refineMatch.Checked == true,
+        _curvatureTolerance.Value, _averageSurfaces.Checked == true,
+        (MatchIsoDirection)_isoDirection.SelectedIndex, _previewOpacity.Value, _showWires.Checked == true);
 
     private void RefreshStatus()
     {
         var outcome = _session.CurrentOutcome;
         var candidate = _session.Candidate;
         var settings = _session.CurrentSettings;
+        var metrics = outcome?.Metrics;
         if (outcome?.Success == true && candidate is not null)
         {
-            var metrics = outcome.Metrics;
             _status.Text = "READY · " + (metrics?.Token ?? "BOUNDED_RESULT")
-                + $"\nFaces {candidate.Faces.Count.ToString(CultureInfo.InvariantCulture)}"
-                + $" · edges {candidate.Edges.Count.ToString(CultureInfo.InvariantCulture)}"
-                + $" · {outcome.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)} ms"
-                + (metrics is null
-                    ? string.Empty
-                    : $"\nGap {FormatMetric(metrics.MaximumGap)}"
-                        + $" · sampled normal {FormatMetric(metrics.MaximumNormalAngleDegrees)}°"
-                        + $" · sampled curvature {FormatMetric(metrics.MaximumCurvatureDeviationPercent)}%"
-                        + $" · n={metrics.SampleCount.ToString(CultureInfo.InvariantCulture)}")
-                + (settings.AverageSurfaces
-                    ? $"\nAVERAGE ON · replaces {outcome.ParentObjectCount.ToString(CultureInfo.InvariantCulture)} source Breps with one joined result · first-source attributes"
-                    : _plan.Strategy == SurfaceStrategy.MatchSrf
-                        ? "\nSources unchanged · adds one matched cap"
-                        : "\nSources unchanged · adds one result");
+                + "\nFaces " + candidate.Faces.Count + " · edges " + candidate.Edges.Count
+                + " · " + outcome.ElapsedMilliseconds + " ms" + MetricSummary(metrics)
+                + (settings.AverageSurfaces ? "\nAVERAGE ON · replaces " + outcome.ParentObjectCount + " owning Breps with one joined result"
+                    : "\nSources unchanged · adds one result");
         }
         else
         {
             _status.Text = "BLOCKED · Enter will not change the document"
-                + (outcome is null ? string.Empty : $"\n{outcome.Code} · {outcome.Message}");
+                + (outcome is null ? string.Empty : "\n" + outcome.Code + " · " + outcome.Message)
+                + MetricSummary(metrics);
         }
-
-        _instruction.Text = settings.AverageSurfaces
-            ? "Enter / Space / right-click — replace sources with averaged joined result    •    Esc — cancel"
-            : _plan.Strategy == SurfaceStrategy.MatchSrf
-                ? "Enter / Space / right-click — add matched cap    •    Esc — cancel"
-                : "Enter / Space / right-click — add result    •    Esc — cancel";
+        _instruction.Text = !_session.HasCandidate ? "Esc — cancel. Adjust settings to rebuild; see command history for every attempt."
+            : settings.AverageSurfaces ? "Enter / Space / right-click — replace sources with averaged joined result    •    Esc — cancel"
+            : "Enter / Space / right-click — add result    •    Esc — cancel";
     }
 
-    private static string FormatMetric(double value)
-    {
-        if (double.IsNaN(value))
-        {
-            return "n/a";
-        }
-
-        if (double.IsPositiveInfinity(value))
-        {
-            return "∞";
-        }
-
-        return value.ToString("G5", CultureInfo.InvariantCulture);
-    }
+    private static string MetricSummary(BoundaryMatchMetrics? m) => m is null ? string.Empty
+        : "\nGap " + BoundaryMatchVerifier.Number(m.MaximumGap)
+            + " · normal " + BoundaryMatchVerifier.Number(m.MaximumNormalAngleDegrees) + "°"
+            + " · curvature " + BoundaryMatchVerifier.Number(m.MaximumCurvatureDeviationPercent) + "%"
+            + "\nBoundary edges " + m.BoundaryEdgeCount + " · loops " + m.BoundaryComponents
+            + " · samples " + m.SampleCount;
 
     private void RequestAccept()
     {
-        if (AcceptRequested || CancelRequested)
-        {
-            return;
-        }
-
-        if (!PrepareForAcceptance())
-        {
-            RefreshStatus();
-            return;
-        }
-
+        if (AcceptRequested || CancelRequested) return;
+        if (!PrepareForAcceptance()) { RefreshStatus(); return; }
         AcceptRequested = true;
         _closingForDecision = true;
         Close();
@@ -397,11 +247,7 @@ internal sealed class SmartSkinPreviewForm : Form
 
     private void RequestCancel()
     {
-        if (AcceptRequested || CancelRequested)
-        {
-            return;
-        }
-
+        if (AcceptRequested || CancelRequested) return;
         CancelRequested = true;
         _closingForDecision = true;
         _rebuildTimer.Stop();
@@ -410,17 +256,7 @@ internal sealed class SmartSkinPreviewForm : Form
 
     private void HandleDecisionKey(object? sender, KeyEventArgs eventArgs)
     {
-        if (eventArgs.Key == Keys.Escape)
-        {
-            eventArgs.Handled = true;
-            RequestCancel();
-            return;
-        }
-
-        if (eventArgs.Key == Keys.Enter || eventArgs.Key == Keys.Space)
-        {
-            eventArgs.Handled = true;
-            RequestAccept();
-        }
+        if (eventArgs.Key == Keys.Escape) { eventArgs.Handled = true; RequestCancel(); }
+        else if (eventArgs.Key == Keys.Enter || eventArgs.Key == Keys.Space) { eventArgs.Handled = true; RequestAccept(); }
     }
 }

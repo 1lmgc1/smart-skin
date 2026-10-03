@@ -1,92 +1,19 @@
-# P07 measured surface matching
+# P07F1 — 0.0.13-p07f1
 
-Version: `0.0.12-p07`.
-Baseline: P06 commit `a33f0e92bfa14ad0cbe2a7a38e7b180545212d40`.
-Minimum runtime: Rhino `8.21`.
+Objective: replace the verifier's single-natural-output-edge assumption with whole-boundary verification and truthful failure diagnostics. The native MatchSrf solver, seed construction, refinement tolerances and strict Join proof are unchanged. No claim that a formerly rejected native cap has become geometrically correct merely because its verifier changed.
 
-## Why P07 exists
+- Accept one topological naked cycle represented by one or multiple edges, including trimmed output boundaries. Preserve original edge/trim/face ownership for sampling. Reject extra boundary components, branches, disconnected cap faces, invalid ownership and nonmanifold topology.
+- Measure the complete candidate/target loop in both directions. Remove the output-boundary search's hidden 2x-tolerance cutoff; retain and report a large measured gap as BOUNDARY_GAP_OUT_OF_TOLERANCE.
+- Sample both directions to cover short split output edges. Keep G0/G1/G2 thresholds, orientation-aware normal curvature, bounded sample limits and explicit ambiguity rejection. Same-face splits at a shared vertex are permitted; nonlocal overlap or ambiguous different-face correspondence is blocked.
+- Print each native direction variant, its phase, topology, partial metrics and reason before disposing rejected geometry. Do not discard all evidence merely because the last variant fails.
+- Disable Average for ineligible trimmed targets before changing it; explain eligibility in the same settings window. No object-first selection step. No new toolbar buttons.
+- Eight new native-free topology unit tests and eight native synthetic validator self-tests. Native self-tests execute once before the first match on Rhino's command/UI thread and fail closed. CI compilation/core tests do not execute Rhino native geometry.
+- Version identity P07F1. Existing P07 outcome codes remain to preserve log consumers.
 
-The P06 interaction is accepted, but its contextual result is rejected as
-geometry: `Brep.CreatePatch` produced a visible edge deviation of about
-`0.215 mm` in a document with `0.01 mm` absolute tolerance and did not prove
-position, tangency or curvature continuity. P07 preserves the one-button/live
-window interaction and replaces only that geometry route.
+## Verification status
 
-## Matched-cap route
+Check the Actions run for the exact commit for compilation, Core regression and installer results. Native self-tests and the private opening are NOT VERIFIED until their actual Rhino log is returned. Green CI is not geometric acceptance. No global surface-fairness, interior foldover or universal G2 proof is claimed by these sampled boundary checks.
 
-For one closed loop of five to eight naked Brep edges, Smart Skin now:
+## Preserved history
 
-1. preserves each selected edge's adjacent Brep face;
-2. joins copies of the owning Breps into one disposable context shell;
-3. builds one disposable untrimmed closed-edge seed cap;
-4. calls Rhino 8.21 `Brep.CreateFromMatch` against the mapped Brep edges;
-5. samples the result and blocks confirmation unless the selected continuity
-   passes its tolerances;
-6. joins the cap to a disposable copy of the context and proves that the cap
-   boundary became one closed interior seam at document tolerance.
-
-The builder tries both closed-edge match directions (and both target directions
-for Average) within a fixed two/four-attempt bound. It keeps the first variant
-that passes continuity and Join proof and reports both direction flags.
-Owning context is capped by face, edge and surface-complexity budgets; after a
-slow native return, the ten-second build budget prevents starting more variants.
-Esc is observed before variants and again after each synchronous native return;
-Rhino's MatchSrf call itself is not force-aborted on another thread.
-
-There is no contextual `CreatePatch` fallback. A failed context join, ambiguous
-edge map, failed native match or unavailable measurement is a diagnosed
-`BLOCKED` result.
-
-## Window controls
-
-- `Position (G0)`, `Tangency (G1)` and `Curvature (G2)` map to native MatchSrf
-  continuity modes.
-- `Refine match` uses document distance/angle tolerances and the displayed
-  curvature tolerance.
-- `Average surfaces` asks Rhino to modify both sides. Rhino supports this only
-  when every target is an untrimmed natural surface edge. Smart Skin checks
-  that precondition explicitly instead of pretending a trimmed edge was
-  averaged. Its orange copy preview is explicit; confirmation replaces the
-  exact owning Breps only after every selected seam is proved interior in one
-  joined result. The new joined object explicitly inherits the first source
-  object's attributes; this policy is shown in the window and machine log.
-- Isocurve direction exposes Automatic, Match target, Perpendicular and
-  Preserve.
-- Opacity and wires affect display only.
-
-Default is G2 + Refine, Average off. Enter, Space and right-click confirm;
-Esc/window close cancel. No Accept/Cancel buttons were added.
-
-## Verification and commit
-
-- G0: maximum cap/target boundary gap must be at or below document absolute
-  tolerance.
-- G1: G0 plus sampled adjacent-face normal angle at or below document angle
-  tolerance.
-- G2: G1 plus sampled cross-boundary radius-of-curvature deviation at or below
-  the selected percent tolerance.
-- G1/G2 sampling is bounded, includes near-end samples, scales with edge spans,
-  and is reported as `sampled_max_*` with its exact sample count.
-- Match-only adds one cap and leaves sources unchanged, but only after the
-  disposable joined-context proof succeeds.
-- Average adds one joined result and deletes only the recorded owning Breps;
-  any partial delete is rolled back before reporting failure.
-
-The supplied six-edge fixture contains trimmed target edges, so its first P07
-field test covers G2 Match-only and exact Join compatibility. Native Average is
-available for eligible all-natural edge loops; converting arbitrary trimmed
-targets into averageable surfaces is not claimed by this patch.
-
-Machine output uses `strategy=MATCH_SRF`, reports the selected boundary count as
-`proved_target_edges` only after the complete loop passes Join proof, and
-distinguishes `G0_VERIFIED`, `G1_SAMPLED_VERIFIED`,
-`G2_SAMPLED_VERIFIED`, `NOT_VERIFIED` and `*_OUT_OF_TOLERANCE`; a request is
-never logged as proof.
-
-## Acceptance state
-
-- Rhino 8.21 API compilation: `STATICALLY CHECKED` locally.
-- GitHub `build-p07`, Core regression, toolbar validation, packaging and
-  artifact identity: pending exact published commit.
-- Rhino geometry behavior: `NOT VERIFIED` until the single test in
-  `FIELD_TEST.md` returns.
+P07 (0.0.12-p07) introduced measured MatchSrf on Rhino 8.21+. Its release notes remain in Git history at 27a4d1e2f0e1b1363915e72cb674147f0a42eddd. Earlier PlanarSrf/EdgeSrf/two-section Loft paths, managed installer, plug-in GUID and single RUI button are preserved.

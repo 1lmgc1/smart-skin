@@ -1,46 +1,26 @@
-# P07 Rhino 8.21+ field test — G2 matched cap and exact Join
+# P07F1: one matched-boundary field test
 
-Use only the green `build-p07` artifact for the exact published commit.
-Expected version: `0.0.12-p07`. Rhino 8.21 or later is required. Installation
-is not a test; report it only if an actual problem occurs.
+Expected version: **0.0.13-p07f1**. Use the green build-p07f1 artifact for the exact published commit. Rhino 8.21+ is required; no .NET setting change. Installation is not a separate test: close Rhino, extract the bundle and run INSTALL.cmd normally. Do not manually register another RHP.
 
-This is one focused geometry check. Do not repeat earlier toolbar or installer
-tests.
+## Goal and starting geometry
 
-## Test
+Use the same private opening with six naked Brep edges on four source Breps, without an old cap covering it. Keep the original file unmodified and work on a copy. The object count is the actual N immediately before this command, not a fixed 12.
 
-1. Open the original private `error_shape.3dm` with 12 active objects.
-2. Run `SmartSurfaceVersion` once and keep its complete `SMARTSKIN_P07 PASS`
-   line.
-3. Click the single `Smart Skin` button. Sub-select the same six naked Brep
-   edges around one opening and finish selection with Enter.
-4. In `Smart Skin — matched result`, keep `Curvature (G2)`, `Refine match`,
-   `Automatic` and `Average surfaces` off. The supplied opening contains
-   trimmed target edges; Rhino's native Average is not valid for that loop.
-5. Wait for `READY · G2_SAMPLED_VERIFIED`. Confirm that the cap is cyan, the averaged
-   context is absent, and the status reports gap, normal-angle and curvature
-   values.
-6. Press Enter, Space or right-click once. Do not look for an Accept button.
-7. Select the new cap and the four neighboring source Breps, run Rhino `Join`,
-   and confirm they become one joined Brep. Undo `Join` once to leave the P07
-   result and original sources as they were after step 6.
+## Actions
 
-## Expected result
+1. Run SmartSurfaceVersion once and retain its complete line.
+2. Click the single Smart Skin button; select the same six opening edges and finish with Enter. No separate whole-object selection is required.
+3. Keep Curvature (G2), Refine ON, curvature tolerance 5%, Automatic. Average must remain OFF and should be disabled with its natural-target eligibility explanation for trimmed targets.
+4. On the first match in this Rhino process, eight small native validator regressions run automatically in memory. They never access RhinoDoc. This is part of this one test, not an extra command. A regression failure blocks building and reports its case.
+5. If the result is READY / G2_SAMPLED_VERIFIED, inspect the cyan cap and confirm with Enter, Space or right-click. Select cap and the four neighbors, run Join, and confirm one joined Brep. Undo Join to restore the separate cap and sources.
+6. If BLOCKED, do not increase tolerance, lower continuity, toggle Average or recreate the input. Press Esc and keep the complete log. A numeric large-gap rejection is a useful diagnostic but is NOT a successful geometry test.
 
-- The opening is filled by one cap with a soft transition into the neighboring
-  faces, and Rhino `Join` accepts all six matched seams.
-- P07 itself adds exactly one cap and leaves all source Breps unchanged. For the
-  unchanged 12-object fixture the expected P07 count is `12->13`.
-- The final line contains `SMARTSKIN_P07 PASS`, `code=P07_ACCEPTED`,
-  `strategy=MATCH_SRF`, `continuity=G2`, `verified=G2_SAMPLED_VERIFIED`,
-  `supports=6`, `parents=4`, `proved_target_edges=6`, `average=OFF`, `added=1`,
-  `replaced=0`, and measured
-  `max_gap`, `sampled_max_normal_deg`, `sampled_max_curvature_pct` and
-  `samples` values.
-- One Undo after P07 itself removes only the new cap.
+## Expected evidence
+
+Successful command identity: SMARTSKIN_P07F1 PASS; version=0.0.13-p07f1; exact commit. Existing P07 action codes are retained: code=P07_ACCEPTED; strategy=MATCH_SRF; continuity=G2; verified=G2_SAMPLED_VERIFIED; supports=6; parents=4; proved_target_edges=6; average=OFF; added=1; replaced=0; objects=N->N+1. Undo the P07F1 command itself removes only its result.
+
+All native variants now emit SMARTSKIN_P07F1_ATTEMPT_START, SMARTSKIN_P07F1_BOUNDARY and SMARTSKIN_P07F1_ATTEMPT_END. Keep both successful and rejected variants, including reason, phase, boundary_edges, boundary_components, max_gap, samples and covered_target_edges. A BLOCKED/Esc finish must not add a result.
 
 ## Return
 
-Return the complete command output and one viewport screenshot showing the
-accepted result and single Smart Skin button. No installer or PowerShell log is
-needed.
+Return the complete Rhino command history from SmartSurfaceVersion through this command's final line and one viewport screenshot. No installer or PowerShell log is needed unless installation actually fails. Do not publish the private model or field evidence to the public repository.

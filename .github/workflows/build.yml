@@ -1,8 +1,8 @@
-name: build-p07
+name: build-p07f1
 
 on:
   push:
-    branches: [main]
+    branches: [main, p07f1]
   pull_request:
   workflow_dispatch:
 
@@ -13,47 +13,55 @@ jobs:
   build-test-package:
     runs-on: windows-latest
     timeout-minutes: 20
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install .NET SDKs
+      - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-
       - name: Restore
         run: dotnet restore SmartSkin.sln
-
       - name: Build
         run: dotnet build SmartSkin.sln --configuration Release --no-restore -p:SourceRevisionId=${{ github.sha }}
-
-      - name: Unit tests
+      - name: Core regression tests (no Rhino runtime)
         run: dotnet test tests/SmartSkin.Core.Tests/SmartSkin.Core.Tests.csproj --configuration Release --framework net8.0 --no-build --logger "trx;LogFileName=core-tests.trx"
-
       - name: Validate native toolbar
         shell: powershell
         run: ./scripts/Test-Toolbar.ps1 -RuiPath "./src/SmartSkin.Rhino8/bin/Release/net48/SmartSkin.Rhino8.rui"
-
       - name: Package field-test artifact
         id: package
         shell: pwsh
-        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.12-p07" -Commit "${{ github.sha }}"
-
+        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.13-p07f1" -Commit "${{ github.sha }}"
+      - name: Isolated installer lifecycle
+        shell: powershell
+        env:
+          PACKAGE_ROOT: ${{ steps.package.outputs.package_root }}
+        run: ./scripts/Test-InstallerLifecycle.ps1 -PackageRoot $env:PACKAGE_ROOT -LogPath "./artifacts/installer-test.log"
+      - name: State native verification boundary
+        shell: pwsh
+        run: |
+          @"
+          commit=${{ github.sha }}
+          rhino_native_regressions=NOT_RUN_IN_CI
+          native_selftests=8;automatic_once_before_first_match_in_Rhino
+          private_geometry=NOT_VERIFIED
+          "@ | Set-Content ./artifacts/verification-scope.txt
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P07-test-report-${{ github.run_number }}
-          path: tests/SmartSkin.Core.Tests/TestResults/*.trx
+          name: SmartSkin-P07F1-test-report-${{ github.run_number }}
+          path: |
+            tests/SmartSkin.Core.Tests/TestResults/*.trx
+            artifacts/installer-test.log
+            artifacts/verification-scope.txt
           if-no-files-found: warn
           retention-days: 30
-
       - name: Upload Rhino field-test package
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P07-${{ github.run_number }}-${{ github.sha }}
+          name: SmartSkin-P07F1-${{ github.run_number }}-${{ github.sha }}
           path: ${{ steps.package.outputs.artifact_path }}
           if-no-files-found: error
           compression-level: 0

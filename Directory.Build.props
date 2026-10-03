@@ -6,8 +6,8 @@
     <Copyright>Copyright © 2026 Smart Skin Project</Copyright>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/1lmgc1/smart-skin</RepositoryUrl>
-    <VersionPrefix>0.0.12</VersionPrefix>
-    <VersionSuffix>p07</VersionSuffix>
+    <VersionPrefix>0.0.13</VersionPrefix>
+    <VersionSuffix>p07f1</VersionSuffix>
     <SourceRevisionId Condition="'$(SourceRevisionId)' == ''">local</SourceRevisionId>
     <InformationalVersion>$(VersionPrefix)-$(VersionSuffix)+$(SourceRevisionId)</InformationalVersion>
     <Deterministic>true</Deterministic>
@@ -18,9 +18,8 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <CheckEolTargetFramework>false</CheckEolTargetFramework>
   </PropertyGroup>
-
   <ItemGroup>
     <AssemblyMetadata Include="GitCommit" Value="$(SourceRevisionId)" />
-    <AssemblyMetadata Include="Patch" Value="P07" />
+    <AssemblyMetadata Include="Patch" Value="P07F1" />
   </ItemGroup>
 </Project>

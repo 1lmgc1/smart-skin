@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using Rhino;
 using Rhino.DocObjects;
 using Rhino.Geometry;
 using SmartSkin.Core.Construction;
@@ -745,9 +746,15 @@ internal sealed class RhinoCandidateBuilder
         failureMessage = "Rhino MatchSrf did not return a matched cap for this direction variant.";
         Brep? joinedProof = null;
         var success = false;
+        var variant = "reverse_match=" + (reverseMatchDirection ? "ON" : "OFF")
+            + ";reverse_average_target=" + (reverseAverageTargetDirection ? "ON" : "OFF");
+        var phase = "NATIVE_MATCH";
+        var attemptWatch = Stopwatch.StartNew();
 
         try
         {
+            RhinoApp.WriteLine("SMARTSKIN_P07F1_ATTEMPT_START | " + variant
+                + " | continuity=" + settings.ContinuityToken);
             if (cancellationRequested?.Invoke() == true)
             {
                 failureCode = CandidateBuildCodes.BuildCancelled;
@@ -783,6 +790,7 @@ internal sealed class RhinoCandidateBuilder
                 return false;
             }
 
+            phase = "RESULT_VALIDATION";
             if (cancellationRequested?.Invoke() == true)
             {
                 failureCode = CandidateBuildCodes.BuildCancelled;
@@ -800,6 +808,7 @@ internal sealed class RhinoCandidateBuilder
             IReadOnlyList<BrepEdge> verificationTargets = context.TargetEdges;
             if (settings.AverageSurfaces)
             {
+                phase = "AVERAGE_MAPPING";
                 if (averagedContext is null || !IsBoundedValidResult(averagedContext))
                 {
                     failureCode = CandidateBuildCodes.AverageTargetMissing;
@@ -826,15 +835,21 @@ internal sealed class RhinoCandidateBuilder
                 averagedContext = null;
             }
 
+            phase = "BOUNDARY_VERIFICATION";
             metrics = BoundaryMatchVerifier.Verify(
                 matched,
                 verificationTargets,
                 settings,
                 absoluteTolerance,
-                angleToleranceRadians);
+                angleToleranceRadians,
+                variant,
+                writeDiagnostics: true,
+                cancellationRequested);
             if (!metrics.Available)
             {
-                failureCode = CandidateBuildCodes.VerificationUnavailable;
+                failureCode = metrics.Reason == "VERIFICATION_CANCELLED"
+                    ? CandidateBuildCodes.BuildCancelled
+                    : CandidateBuildCodes.VerificationUnavailable;
                 failureMessage = metrics.Message;
                 return false;
             }
@@ -853,6 +868,7 @@ internal sealed class RhinoCandidateBuilder
                 return false;
             }
 
+            phase = "JOIN";
             var joinContext = settings.AverageSurfaces ? averagedContext! : context.Shell;
             joinedProof = RequireSingle(
                 Brep.JoinBreps(
@@ -867,6 +883,7 @@ internal sealed class RhinoCandidateBuilder
                 return false;
             }
 
+            phase = "JOIN_PROOF";
             if (!ProveJoinedCapBoundary(
                     joinedProof,
                     matched,
@@ -893,6 +910,7 @@ internal sealed class RhinoCandidateBuilder
                 commitBrep = matched;
             }
 
+            phase = "READY";
             success = true;
             return true;
         }
@@ -904,6 +922,8 @@ internal sealed class RhinoCandidateBuilder
         }
         finally
         {
+            BoundaryAttemptTrace.Write(variant, phase, success, failureCode, failureMessage,
+                matched, metrics, joinedSeamCount, attemptWatch.ElapsedMilliseconds);
             joinedProof?.Dispose();
             if (!success)
             {
@@ -1524,7 +1544,8 @@ internal sealed class RhinoCandidateBuilder
             }
 
             var maximumGap = Math.Max(forwardGap, reverseGap);
-            if (maximumGap > absoluteTolerance + 1e-12)
+            if (double.IsNaN(maximumGap) || double.IsInfinity(maximumGap)
+                || maximumGap > absoluteTolerance + 1e-12)
             {
                 message = "The joined cap seam is outside document absolute tolerance from the selected target loop: "
                     + maximumGap.ToString("G6", CultureInfo.InvariantCulture) + ".";
