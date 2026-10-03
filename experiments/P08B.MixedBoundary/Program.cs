@@ -130,7 +130,7 @@ internal static class Program
         });
         Test("selection_order_does_not_assign_continuity", () =>
         {
-            var a = Assess(observations: Observations().Reverse().ToArray());
+            var a = Assess(observations: Enumerable.Reverse(Observations()).ToArray());
             Check(a.State == CandidateState.Ready && a.Edges[0].EdgeKey == "A");
         });
         Test("no_Frankenstein_candidate_measurements", () =>
