@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "0.0.13-p07f1",
+    [string]$Version = "0.0.14-p07f2",
     [string]$Commit = "local",
     [string]$OutputRoot = ""
 )
@@ -29,7 +29,7 @@ foreach ($Name in @("SmartSkin.Rhino8.rhp", "SmartSkin.Rhino8.rui", "SmartSkin.R
     $Candidate = Join-Path $Source $Name
     if (Test-Path $Candidate) { Copy-Item $Candidate $Destination }
 }
-foreach ($Name in @("FIELD_TEST.md", "PATCH_NOTES.md", "P07F1_VERIFICATION.md")) {
+foreach ($Name in @("FIELD_TEST.md", "PATCH_NOTES.md", "P07F1_VERIFICATION.md", "P07F2_VERIFICATION.md")) {
     Copy-Item (Join-Path (Join-Path $RepoRoot "docs") $Name) $Stage
 }
 foreach ($Name in @("INSTALL.cmd", "UNINSTALL.cmd", "Install-SmartSkin.ps1", "Uninstall-SmartSkin.ps1", "Test-Toolbar.ps1")) {
@@ -40,7 +40,7 @@ foreach ($Name in @("INSTALL.cmd", "UNINSTALL.cmd", "Install-SmartSkin.ps1", "Un
 @(
     "package=$PackageName"
     "version=$Version"
-    "patch=P07F1"
+    "patch=P07F2"
     "commit=$Commit"
     "configuration=$Configuration"
     "installer=managed-v1"

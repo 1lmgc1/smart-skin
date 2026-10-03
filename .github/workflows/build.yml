@@ -1,8 +1,8 @@
-name: build-p07f1
+name: build-p07f2
 
 on:
   push:
-    branches: [main, p07f1]
+    branches: [main, p07f2]
   pull_request:
   workflow_dispatch:
 
@@ -16,6 +16,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: P07F2 source integrity guards (not native tests)
+        shell: powershell
+        run: ./scripts/Test-P07F2Guards.ps1
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -32,7 +37,7 @@ jobs:
       - name: Package field-test artifact
         id: package
         shell: pwsh
-        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.13-p07f1" -Commit "${{ github.sha }}"
+        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.14-p07f2" -Commit "${{ github.sha }}"
       - name: Isolated installer lifecycle
         shell: powershell
         env:
@@ -45,13 +50,14 @@ jobs:
           commit=${{ github.sha }}
           rhino_native_regressions=NOT_RUN_IN_CI
           native_selftests=8;automatic_once_before_first_match_in_Rhino
+          ui_rendering=NOT_RUN_IN_CI
           private_geometry=NOT_VERIFIED
           "@ | Set-Content ./artifacts/verification-scope.txt
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P07F1-test-report-${{ github.run_number }}
+          name: SmartSkin-P07F2-test-report-${{ github.run_number }}
           path: |
             tests/SmartSkin.Core.Tests/TestResults/*.trx
             artifacts/installer-test.log
@@ -61,7 +67,7 @@ jobs:
       - name: Upload Rhino field-test package
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P07F1-${{ github.run_number }}-${{ github.sha }}
+          name: SmartSkin-P07F2-${{ github.run_number }}-${{ github.sha }}
           path: ${{ steps.package.outputs.artifact_path }}
           if-no-files-found: error
           compression-level: 0

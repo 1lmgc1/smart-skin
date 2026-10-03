@@ -1,9 +1,11 @@
-# Smart Skin handoff — P07F1
+# Smart Skin handoff — P07F2
 
-Current code version: 0.0.13-p07f1. Minimum Rhino 8.21, net48 compatibility binary. Prior P07 load was field-confirmed on Rhino 8.35 / .NET 8; this does not establish the new assembly's field result.
+Current source version: 0.0.14-p07f2. Baseline: P07F1 b0581d2f627b323ec4f89fee7df0f1171ce18594. Rhino 8.21+; existing net48-compatible host / netstandard2.0 Core. Do not switch runtimes to address the current fixture issue.
 
-The P07 field attempt reached the verifier but stopped before continuity sampling/Join because the output-boundary search required a single closed natural edge and hid proximity failures. P07F1 verifies the actual whole naked cycle and reports every variant, topology, gap and correspondence failure. See P07F1_VERIFICATION.md and FIELD_TEST.md. Native solver/seed and strict Join checks remain unchanged.
+Objective: restore access to the geometry field test after the P07F1 synthetic split-edge fixture initialization and settings-window column defects. See P07F2_VERIFICATION.md. The production verifier, native MatchSrf/seed, thresholds, source commit/Undo path, Core and single RUI button remain unchanged. All eight native fixtures remain mandatory; none is ignored or converted to a warning.
 
-Never declare the private opening or native regression fixtures VERIFIED solely from green CI. Read the exact Actions commit and then the actual Rhino field log. The first match runs eight in-memory verifier fixtures automatically. Current install/selection/geometry work should continue with the single focused field test, not repeat earlier toolbar or PowerShell diagnostics. Use actual N object count.
+Current exact code and CI evidence must be read from GitHub. Do not infer native success from green Core tests or static guards. P07F2 native execution, rendering and actual hole construction remain NOT VERIFIED until the next field log. The unchanged production diagnostics retain P07F1 event prefixes and P07 action codes; current identity and native self-test prefix are P07F2.
 
-GitHub is the code/artifact source. Google Drive is the private development journal. No private models, screenshots, object IDs or field logs should be committed here. Preserve one product button and one live settings window; Enter/Space/right-click confirm only a verified candidate, Esc cancels. Average remains explicit and unavailable for trimmed targets. The next solver changes require review of the P07F1 field evidence, not a silent fallback to the rejected CreatePatch route.
+Next: one normal build attempt on the already prepared opening, with the complete version, native fixture diagnostics, all native variants and final action. Do not ask for repeat deletion/preparation, .NET changes, toolbar tests or a new whole-object selection scheme. If the fixture passes but the cap still fails, analyze that actual geometry failure before any new solver patch.
+
+GitHub is authoritative for source and release artifacts; Google Drive is the private checkpoint journal. Private models, screenshots, user object IDs and field logs stay out of the public repo. Preserve explicit acceptance, source isolation and one-button/live-window interaction. Remaining automatic opening discovery and broader solver work are deferred until this single-hole path has field evidence.

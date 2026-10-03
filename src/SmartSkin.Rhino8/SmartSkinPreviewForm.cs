@@ -119,16 +119,25 @@ internal sealed class SmartSkinPreviewForm : Form
                 : "This route uses its bounded native constructor; match controls are disabled.",
             Wrap = WrapMode.Word,
         };
+        // Each outer row has ONE child. Full-width notes and checkboxes must not
+        // share a table column with field captions, pushing inputs out of the window.
         var matchLayout = new DynamicLayout { Padding = new Padding(10), Spacing = new Size(8, 7) };
-        matchLayout.AddRow(new Label { Text = "Continuity" }, _continuity);
+        matchLayout.AddRow(SettingRow("Continuity", _continuity));
         matchLayout.AddRow(_refineMatch);
-        matchLayout.AddRow(new Label { Text = "Curvature tolerance, %" }, _curvatureTolerance);
+        matchLayout.AddRow(SettingRow("Curvature tolerance, %", _curvatureTolerance));
         matchLayout.AddRow(_averageSurfaces);
-        if (match) matchLayout.AddRow(new Label { Text = _session.AverageNote, Wrap = WrapMode.Word });
-        matchLayout.AddRow(new Label { Text = "Isocurve direction" }, _isoDirection);
+        if (match) matchLayout.AddRow(new Label
+        {
+            Text = _session.AverageNote,
+            Wrap = WrapMode.Word,
+            Width = 430,
+        });
+        matchLayout.AddRow(SettingRow("Isocurve direction", _isoDirection));
         var matchGroup = new GroupBox { Text = "Surface match", Content = matchLayout };
         var appearance = new DynamicLayout { Padding = new Padding(10), Spacing = new Size(8, 7) };
-        appearance.AddRow(new Label { Text = "Opacity" }, _previewOpacity, _previewOpacityValue);
+        var opacityRow = new DynamicLayout { Spacing = new Size(8, 7) };
+        opacityRow.AddRow(new Label { Text = "Opacity", Width = 130 }, _previewOpacity, _previewOpacityValue);
+        appearance.AddRow(opacityRow);
         appearance.AddRow(_showWires);
         var appearanceGroup = new GroupBox { Text = "Preview", Content = appearance };
         _status.Wrap = WrapMode.Word;
@@ -142,6 +151,13 @@ internal sealed class SmartSkinPreviewForm : Form
         layout.AddRow(_status);
         layout.AddRow(_instruction);
         return layout;
+    }
+
+    private static Control SettingRow(string caption, Control field)
+    {
+        var row = new DynamicLayout { Spacing = new Size(8, 7) };
+        row.AddRow(new Label { Text = caption, Width = 180 }, field);
+        return row;
     }
 
     private void WireEvents()
@@ -224,7 +240,9 @@ internal sealed class SmartSkinPreviewForm : Form
                 + (outcome is null ? string.Empty : "\n" + outcome.Code + " · " + outcome.Message)
                 + MetricSummary(metrics);
         }
-        _instruction.Text = !_session.HasCandidate ? "Esc — cancel. Adjust settings to rebuild; see command history for every attempt."
+        _instruction.Text = outcome?.Code == "P07F1_VALIDATOR_SELFTEST_FAILED"
+            ? "Esc — cancel. Internal self-test failed; changing settings cannot repair this build. See command history."
+            : !_session.HasCandidate ? "Esc — cancel. Adjust settings to rebuild; see command history for every attempt."
             : settings.AverageSurfaces ? "Enter / Space / right-click — replace sources with averaged joined result    •    Esc — cancel"
             : "Enter / Space / right-click — add result    •    Esc — cancel";
     }

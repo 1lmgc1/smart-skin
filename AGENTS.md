@@ -16,6 +16,7 @@ Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Pre
 - P05 is version `0.0.10-p05`: one contextual tangent Patch candidate from five to eight selected naked Brep edges. That release preserves all P04F1 toolbar identities and every earlier bounded route.
 - P06 is version `0.0.11-p06`: one visible Smart Skin button, one modeless live-result window, and Rhino-native Enter/Space/right-click confirmation. Retire the three diagnostic button nodes without reusing their GUIDs; preserve their command, macro and bitmap identities. Keep Plan, Preflight and Version available only as command-line diagnostics. Do not add visible Accept/Cancel controls.
 - P07 is version `0.0.12-p07` and requires Rhino 8.21 or later. Keep the P06 button/window contract. The five-to-eight-edge contextual route must use `Brep.CreateFromMatch`; do not silently fall back to `CreatePatch` or report requested continuity as verified continuity. Commit only after measured tolerances pass. Average surfaces is allowed only when every target is an untrimmed natural edge; it is an explicit destructive mode, must prove every seam joined and must be one Rhino undo operation.
+- P07F1 is version `0.0.13-p07f1`: whole-boundary verification and mandatory native self-tests. P07F2 is `0.0.14-p07f2`: repair the synthetic split-edge fixture initialization and settings-column layout, without changing production geometry or acceptance. Finalize only the synthetic fixture's missing vertex tolerance, then require its native validity AND full G2 verification. Do not bypass the eight-case gate. P07F2 static source guards are not native or UI-rendering tests. Its actual field evidence is still required. Existing P07/P07F1 diagnostic protocol identifiers are intentionally retained where unchanged.
 - Preserve fixed plug-in and UI GUIDs. Never reset Rhino layouts or delete shared UI settings to repair a toolbar.
 
 ## Safety invariants
@@ -40,5 +41,6 @@ Smart Skin is a Rhino 8 surface-assistance plug-in. P01/P01F1 GeometryReport/Pre
 dotnet restore SmartSkin.sln
 dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=local
 dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --no-build
-.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.12-p07 -Commit local
+.\scripts\Test-P07F2Guards.ps1
+.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.14-p07f2 -Commit local
 ```

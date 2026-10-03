@@ -3,14 +3,17 @@ using System.Collections.Generic;
 using System.Linq;
 using Rhino;
 using Rhino.Geometry;
+using SmartSkin.Core;
 
 namespace SmartSkin.Rhino8;
 
 /// <summary>Small native regression fixtures. Runs on the Rhino command thread,
-/// once per process before the first P07F1 match. Never accesses RhinoDoc.</summary>
+/// once per process before the first match. Never accesses RhinoDoc.</summary>
 internal static class BoundaryVerifierSelfTests
 {
     private const double Tolerance = 0.0001;
+    private static readonly string Prefix = "SMARTSKIN_"
+        + BuildIdentity.FromAssembly(typeof(BoundaryVerifierSelfTests).Assembly).Patch;
     private static bool? _passed;
     public static string LastFailure { get; private set; } = string.Empty;
 
@@ -25,12 +28,13 @@ internal static class BoundaryVerifierSelfTests
             try
             {
                 action();
-                RhinoApp.WriteLine("SMARTSKIN_P07F1_SELFTEST | case=" + name + " | PASS");
+                RhinoApp.WriteLine(Prefix + "_SELFTEST | case=" + name + " | PASS");
             }
             catch (Exception exception)
             {
-                failures.Add(name + ": " + exception.Message);
-                RhinoApp.WriteLine("SMARTSKIN_P07F1_SELFTEST | case=" + name + " | FAIL | " + exception.Message);
+                var detail = OneLine(exception.Message);
+                failures.Add(name + ": " + detail);
+                RhinoApp.WriteLine(Prefix + "_SELFTEST | case=" + name + " | FAIL | " + detail);
             }
         }
 
@@ -52,12 +56,49 @@ internal static class BoundaryVerifierSelfTests
         {
             using var cap = Rectangle();
             using var target = cap.DuplicateBrep();
+            RequireValidFixture(cap, "before_split");
             var middle = cap.Edges[0].Domain.ParameterAt(0.5);
             Check(cap.Edges.SplitEdgeAtParameters(0, new[] { middle }) == 1, "Could not split fixture edge.");
+
+            // Low-level edge splitting can leave a new vertex tolerance unset.
+            // Record that state, but do not require it: Rhino may initialize it in a future runtime.
+            var rawValid = cap.IsValidWithLog(out var rawLog);
+            RhinoApp.WriteLine(Prefix + "_FIXTURE | case=split_edge_same_face | stage=POST_SPLIT"
+                + " | valid=" + rawValid + " | validity_log=" + OneLine(rawLog));
+
+            // Finish ONLY this synthetic fixture. This does not change a document tolerance,
+            // repair a user's Brep, bypass IsValid, or alter the production verifier.
+            // McNeel's low-level SplitEdge completion pattern:
+            // https://discourse.mcneel.com/t/161849/3
+            cap.SetTolerancesBoxesAndFlags(
+                bLazy: true,
+                bSetVertexTolerances: true,
+                bSetEdgeTolerances: false,
+                bSetTrimTolerances: false,
+                bSetTrimIsoFlags: false,
+                bSetTrimTypeFlags: false,
+                bSetLoopTypeFlags: false,
+                bSetTrimBoxes: false);
             cap.Compact();
-            Check(cap.Edges.Count == 5, "Fixture did not retain the split.");
+            RequireValidFixture(cap, "after_split_finalization");
+            Check(cap.Faces.Count == 1 && cap.Edges.Count == 5 && cap.Vertices.Count == 5,
+                "Finalized fixture must retain one face, five edges and five vertices.");
+            Check(target.Faces.Count == 1 && target.Edges.Count == 4,
+                "The unsplit comparison fixture must retain four edges.");
+            using var capSurface = cap.Faces[0].DuplicateSurface();
+            using var targetSurface = target.Faces[0].DuplicateSurface();
+            Check(capSurface is not null && targetSurface is not null
+                && GeometryBase.GeometryEquals(capSurface, targetSurface),
+                "Splitting a boundary must not change its underlying surface.");
+            RhinoApp.WriteLine(Prefix + "_FIXTURE | case=split_edge_same_face | stage=FINALIZED"
+                + " | valid=True | faces=1 | edges=5 | vertices=5 | target_edges=4 | surface_unchanged=True");
+
             var metrics = CheckAgainst(cap, target);
-            Check(metrics.Verified, "A split boundary must still pass G2: " + metrics.Reason);
+            Check(metrics.Verified, "A split boundary must still pass G2: " + metrics.Reason + "; " + metrics.Message);
+            Check(metrics.BoundaryEdgeCount == 5 && metrics.BoundaryComponents == 1
+                && metrics.CoveredCandidateEdges == 5 && metrics.CoveredTargetEdges == 4
+                && metrics.SampleCount > 0 && metrics.MaximumGap <= Tolerance,
+                "G2 pass must retain full five-to-four boundary coverage within the unchanged tolerance.");
         });
         Test("numeric_gap_above_old_prefilter", () =>
         {
@@ -110,7 +151,7 @@ internal static class BoundaryVerifierSelfTests
 
         _passed = failures.Count == 0;
         LastFailure = string.Join("; ", failures);
-        RhinoApp.WriteLine("SMARTSKIN_P07F1_SELFTEST " + (_passed.Value ? "PASS" : "FAIL")
+        RhinoApp.WriteLine(Prefix + "_SELFTEST " + (_passed.Value ? "PASS" : "FAIL")
             + " | cases=" + count + " | failed=" + failures.Count + " | scope=VALIDATOR_ONLY | document_access=NONE");
         return _passed.Value;
     }
@@ -118,11 +159,24 @@ internal static class BoundaryVerifierSelfTests
     private static BoundaryMatchMetrics CheckAgainst(Brep cap, Brep target,
         MatchContinuityLevel continuity = MatchContinuityLevel.Curvature)
     {
+        RequireValidFixture(cap, "verification_cap");
+        RequireValidFixture(target, "verification_target");
         var settings = new CandidateBuildSettings(continuity, true, 5, false,
             MatchIsoDirection.Automatic, 80, true);
         return BoundaryMatchVerifier.Verify(cap,
             target.Edges.Where(edge => edge.Valence == EdgeAdjacency.Naked).ToArray(),
             settings, Tolerance, RhinoMath.ToRadians(1), "selftest", writeDiagnostics: false);
+    }
+
+    private static void RequireValidFixture(Brep brep, string stage)
+    {
+        Check(brep.IsValidWithLog(out var log), "FIXTURE_INVALID at " + stage + ": " + OneLine(log));
+    }
+
+    private static string OneLine(string? text)
+    {
+        return string.IsNullOrWhiteSpace(text) ? "none"
+            : text!.Replace('\r', ' ').Replace('\n', ' ').Replace('|', '/').Trim();
     }
 
     private static Brep Rectangle() => Brep.CreateFromCornerPoints(
