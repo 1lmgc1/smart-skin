@@ -1,50 +1,42 @@
-# P08B.2F1 — compound logical sides, explicit per-source roles
+# P08B.2F2 — adaptive positional boundary before frozen-row refinement
 
-This is a focused layout correction to the P08B.2 constructive experiment, NOT a new RHP release. The experimental script remains PREVIEW ONLY. `main`, installed P07F2, runtime, numerical solver, native G0/Join proof and source protection remain unchanged. Enter/Esc only close a transient preview, never add geometry.
+## Objective and diagnosis
 
-## Correct boundary interpretation
+A logical four-sided layout can be valid while its initial least-squares boundary approximation is outside the positional tolerance. Freezing those inaccurate outer control rows preserves the error; interior-only G1/G2 refinement cannot fix it. The old adapter tested uniform 10/16-control Coons baselines and skipped all refinement when either failed sampled position. Its successful execution footer was not a successful geometric result.
 
-A selected BrepEdge is a source segment, not necessarily one entire logical side of a patch. Two opposing G0 sides can each consist of two source edges, while two curved G2 sides each consist of one source edge: six source segments, four logical sides, 4G0 + 2G2. User roles, not curvature, planarity, position on screen or assumed edge count, define the contract.
+This patch adds a bounded boundary-fitting stage. It is not permission to increase document tolerance, ignore G0, change assigned G0/G2 roles, move parent geometry or declare a sampled result globally certified. The published RHP and `main` stay P07F2. The script remains PREVIEW ONLY.
 
-P08B.2 previously required exactly one contiguous G0 chain and partitioned all remaining source intervals into three smooth sides. It therefore stopped at layout creation for two disjoint G0 chains, before creating or measuring any surface. This is an unsupported layout assumption, not evidence that mixed construction failed or the selected geometry was bad.
+## Implementation
 
-P08B.2F1 partitions the already ordered closed ring into homogeneous role runs. Two G0 runs separated by two G2 runs map directly to bottom/right/top/left; top and left traversal are reversed for tensor-product coordinates. Every source key, original edge/trim/face link, interval and explicit role is retained. No native curve is joined/rebuilt/split by this helper. The one-G0-chain route and its bounded alternative layouts remain available. More than two separated G0 chains remain an explicit unsupported four-side layout, not an excuse to silently change roles.
+`adaptive_boundary.py` fits the four chains with the same endpoint-constrained Householder least-squares solver, inspects each original interval on a separate, denser validation lattice, then adds simple knots near observed residual peaks and refits. Knots alone do not improve the approximation; the subsequent coefficient fit does. Each iteration evaluates all four curves again. Shared U/V knots keep the existing square-net and native conversion APIs unchanged. The final Coons net uses those nonuniform knots and then freezes its outer rows for the existing jet solver.
 
-Canonical cyclic start affects parameter placement only. Selection order does not assign G0 or G2. Whole-loop geometry ordering/closure still uses the original capture guards. Within-side geometric fitting and regularity are still measured by the unchanged construction kernel; grouping metadata is not proof of a good surface.
+The internal target is one quarter of document positional tolerance (0.0025 for a 0.01 document). It is a fitting objective, not a new document tolerance. A finite baseline within document tolerance may still proceed when the tighter objective was not met before its budget; every candidate still needs the unchanged native position/Join checks before preview. An unresolved positional baseline does not enter jet refinement. Exact boundary reproduction is not claimed: this remains approximation of original chains with independent measurements.
 
-## Field action
+Training and validation grids differ; both include the original callback's junction/near-junction sites, and both add samples in each positive knot span. Multiple interior fitting sites prevent newly refined spans from becoming data-free. Worst side, original source key, parameter, target point, fitted point, knots and residuals are logged to the private TXT. Distances are sampled known-correspondence distances, not certified global shortest distances. No source segmentation, role or parent association is erased by grouping.
 
-Use the NEW bundled script `SmartSkin_MixedBoundary_Prototype.py` (the conversation copy can have suffix `_P08B2F1.py`). No reinstallation or runtime changes.
+Only simple interior knots are added. This patch does not insert creases/full-multiplicity internal knots or implement automatic multipatch splitting. A source that cannot be approximated within this bounded smooth representation remains explicitly unresolved. Missing/invalid data and fitting failures never become zero residual or successful G2.
 
-1. In Rhino run `_RunPythonScript`, choose the script, then a new TXT report path.
-2. Select ALL six source Brep edges of the already prepared opening, then Enter.
-3. Select ALL FOUR source segments forming the two G0 sides, including both pieces of each side, then Enter. Leave the two curved edges for preferred G2. Do not manually Join, merge, rebuild or delete source geometry.
-4. Expect `experiment=P08B.2F1`; `SELECTION sharp=4 smooth=2`; `ROLE_CHAINS g0_chains=2 g2_chains=2`; `LAYOUT_PLAN logical_sides=4 source_edges=6 side_edge_counts=2,1,2,1`. `SIDE` lines record membership, role and direction, followed by actual fitting/refinement and per-edge evidence.
-5. A retained candidate is shown only after completed native G0 and copied-context Join proof. If a cyan preview exists, take a screenshot before Enter/Esc closes it. Nothing is added to the document. Attach the complete saved TXT, including later failure details if any.
+Limits: initial counts 10/16, at most 32 controls per direction, 10 adaptation rounds per layout, existing six-layout and 120-second soft budget, Esc checkpoints between calls. A native call is not force-aborted. A previous fitted baseline can survive a later fitting failure, but it is not called a Join-verified retained preview. The existing native candidate pool remains separate and unchanged.
 
-The old instruction to select only two end-face source edges does not describe the revised 4G0+2G2 contract. Successful layout is only permission to TRY construction, not a geometry pass. No all-G0 fallback, tolerance increase or parent edit is introduced.
+## Preserved layers and evidence boundaries
 
-## Preserved construction and safety
+`mixed_kernel.py` remains byte-identical to P08B.2/F1. Its global jet solver, shape operator metric, sampled regularity, retention helpers and mathematical surface evaluator are not replaced. The adapter's make_brep, native deviation, native_evidence, candidate and source-safety methods are unchanged and checksum-tested. The F1 compound-side mapping and all per-source conditions are preserved: two opposed two-edge G0 sides and two one-edge curved G2 sides are six segments and four logical sides.
 
-Four chains are fitted as clamped cubic B-splines with shared endpoints, then a Coons net is formed. Outer control rows stay fixed during global parent-normal and second-derivative refinement. Every full candidate is remeasured; a failed later candidate cannot replace a previously verified positional preview. Data for unaffected original intervals remain distinct rather than being averaged into one side-level success.
+The new tests include a synthetic localized boundary where BOTH original uniform counts fail position, then check the adaptive result with independent dense SciPy evaluation, independent NumPy least squares, distinct sampling lattices, source-role retention, bounds, cancellation, failure retention and frozen outer rows through refinement. The synthetic localized fixture is arbitrary and is NOT an exact replay of private user geometry. It tests positional fitting, not private-hole G2 feasibility.
 
-The single-patch route has no internal Brep seams. The separate two-surface seam measurement helper remains tested, but automatic multipatch construction is not implemented. Budgets remain at most six layouts, control resolutions 10/16, four refinements and a 120-second soft limit; Esc is observed at supported checkpoints. Individual native calls cannot be force-aborted.
+OpenNURBS additionally receives the real nonuniform net, validates its Brep and independently evaluates its dense boundary, then writes/reads a 3dm. This is actual native geometry execution, not a RhinoCommon Join or UI run. Current requested G2, analytic all-points G2, global self-intersection/fairness and actual private-hole success remain separate unproven levels. No user result is committable in this experiment.
 
-High-order evidence remains sampled tangent-plane and full shape-operator comparison, with the same 5% tensor threshold and declared nearly-flat floor. This is not the old P07 cross-curvature/radius percentage and is not an analytical all-points G2 certificate. Sampled regularity/orientation are not complete self-intersection or fairness proof. These limitations are why the experiment has no commit operation.
+## One field attempt
 
-The Rhino adapter converts each eligible full net to a native Brep, compares native evaluations, measures its complete boundary in both directions against all original selected edges, then joins copies of its parents and proves the cap boundary became a closed internal seam. G0 feature edges are not required to be smooth. Original snapshots/counts are compared at exit. The full UTF-8 TXT is flushed per record; only short progress goes to the console.
+Use the NEW bundled script (conversation filename may end `_P08B2F2.py`) with `_RunPythonScript` in Rhino. No plug-in installation or runtime change. Select a fresh TXT path, select ALL six original opening edges and Enter, then select all FOUR G0 source segments (both pairs) and Enter. Leave the TWO curved boundaries at preferred G2. Do not merge, rebuild, delete or otherwise edit the source edges.
 
-## Verification scope
+Expect `experiment=P08B.2F2` and the same `sharp=4 smooth=2`, role chains 2/2 and logical sides 2,1,2,1. New `BOUNDARY_FIT_BEGIN`, `BOUNDARY_FIT`, `BOUNDARY_FIT_SIDE` and `BOUNDARY_FIT_END` records show the positional stage. `JET_START` proves a refinement step was actually entered. `STAGE_SKIPPED` distinguishes unresolved boundary position from a later whole-baseline failure. `SEARCH_END result=NO_CANDIDATE` is unambiguous even if the report footer says execution COMPLETE.
 
-New tests cover the 2+1+2+1 role layout, all cyclic starts and both traversal directions, endpoints, wraparound chains, exact source coverage and reference preservation, nonmutation, unequal fragment counts, old one-chain layouts and explicit rejection of unsupported or missing identities. A constructive synthetic case has four G0 source segments on two opposing sides plus two CURVED G2 sides. The real kernel constructs that surface from the new layout; it is independently sampled on denser non-training boundary points, checked for frozen boundary rows and exercised with reversed traversal.
+When a native G0/Join-verified candidate is retained, the cyan transient preview may show less than requested smoothness and the per-edge evidence remains explicit. Enter/Esc ONLY closes; no object is added. Return the saved TXT and one screenshot only when a preview appears. Repeating the old all-G2 audit or changing selection count is not part of this test.
 
-OpenNURBS conversion/point/normal tests and 3dm roundtrip now include that third constructed case in addition to the two original cases. Source checks require the exact previous numerical kernel and native evaluation/Join/retention/disposal methods. Exact CI output, rather than this document, establishes which checks actually passed.
+## Primary references
 
-Synthetic analytic support callbacks are not a Rhino trim-extraction test. CPython, OpenNURBS and an API compile probe do not execute Rhino UI/Join or the private model. Those levels remain NOT VERIFIED until the next field TXT. This branch contains no private logs, model UUIDs or coordinates. No dependencies are installed in the user's Rhino.
+- NURBS knots, nonuniform representation and knot insertion semantics: https://developer.rhino3d.com/guides/opennurbs/nurbs-geometry-overview/
+- Independent least-squares reference and knot/data rank requirements: https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.make_lsq_spline.html
 
-## References retained for unchanged native interfaces
-
-- Surface derivatives: https://developer.rhino3d.com/api/rhinocommon/rhino.geometry.surface/evaluate
-- Native NURBS: https://developer.rhino3d.com/api/rhinocommon/rhino.geometry.nurbssurface
-- JoinBreps: https://developer.rhino3d.com/api/rhinocommon/rhino.geometry.brep/joinbreps
-- OpenNURBS/rhino3dm scope: https://www.rhino3d.com/features/developer/rhino3dm/
+These references describe interfaces/mathematics; they do not establish success on the private model. Previous construction and F1 documentation remain in Git history at f3b6ef1905ab4b3af18ffae14efe895693edc3e0.

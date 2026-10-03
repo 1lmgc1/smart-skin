@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""P08B.2F1 Rhino adapter: one constructive preview experiment, never a document edit.
+"""P08B.2F2 Rhino adapter: one constructive preview experiment, never a document edit.
 Run the BUNDLED file with _RunPythonScript. No installation or numpy is required.
 """
 from __future__ import division
 from mixed_kernel import *
+from adaptive_boundary import adaptive_coons
 import io
 import os
 import time
@@ -11,7 +12,7 @@ import json
 import hashlib
 import traceback
 
-EXPERIMENT = 'P08B.2F1'
+EXPERIMENT = 'P08B.2F2'
 CODE_COMMIT = 'WORKTREE'
 try: text_type=unicode
 except NameError: text_type=str
@@ -336,21 +337,39 @@ class Experiment(object):
             for index,layout in enumerate(layouts):
                 self.check(); name='layout'+str(index)+'_n'+str(n)
                 sides={s:Chain(layout[s],self.features,self.offset) for s in SIDES}
-                self.report.emit('LAYOUT',name=name,sides=';'.join(s+':'+','.join(e['key'] for e in layout[s]) for s in SIDES),method='FIXED_BOUNDARY_COONS_PLUS_GLOBAL_JET_FIT')
+                self.report.emit('LAYOUT',name=name,sides=';'.join(s+':'+','.join(e['key'] for e in layout[s]) for s in SIDES),method='ADAPTIVE_BOUNDARY_COONS_PLUS_FIXED_ROW_JETS')
                 try:
-                    base=construct_coons(sides,n=n,p=3,corner_tolerance=self.tol)
+                    def fit_step(record):
+                        details=record.get('evidence')
+                        if details is None:
+                            self.report.emit('BOUNDARY_FIT_ERROR',layout=name,round=record['round'],error=record.get('error'),previous_fitted_baseline_retained=True)
+                            return
+                        self.report.emit('BOUNDARY_FIT',layout=name,round=record['round'],controls=record['controls'],gap_sampled=details['gap'],target=details['target'],document_tolerance=self.tol,target_sampled=details['target_sampled_met'],document_sampled=details['document_sampled_met'],kept=record['kept'],best_gap=record['best_gap'],knots=','.join('%.12g'%k for k in record['knots']),scope=details['scope'])
+                        for side in SIDES:
+                            item=details['sides'][side]; witness=item['witness']
+                            self.report.emit('BOUNDARY_FIT_SIDE',layout=name,round=record['round'],side=side,gap_sampled=item['gap'],samples=item['samples'],witness_parameter=witness['parameter'],source_key=witness['source_key'],target_point=witness['target_point'],fitted_point=witness['fitted_point'],coordinate_frame='LOCAL_ORIGIN',original_intervals=len(item['sources']))
+                    self.report.emit('BOUNDARY_FIT_BEGIN',layout=name,start_controls=n,max_controls=32,max_rounds=10,document_tolerance=self.tol,fit_target=self.tol*.25,method='RESIDUAL_DIRECTED_SIMPLE_KNOTS_AND_REFIT',role_changes=0)
+                    fit=adaptive_coons(sides,n=n,p=3,tolerance=self.tol,checkpoint=self.check,on_step=fit_step)
+                    base=fit.patch; name=name+'_adaptive_n'+str(base.n)
+                    self.report.emit('BOUNDARY_FIT_END',layout=name,result=fit.reason,rounds=len(fit.history),gap_sampled=fit.evidence['gap'],document_sampled=fit.evidence['document_sampled_met'],target_sampled=fit.evidence['target_sampled_met'],outer_rows_frozen_after_fit=True,native_join='NOT_RUN_YET')
+                    if not fit.evidence['document_sampled_met']:
+                        self.report.emit('STAGE_SKIPPED',layout=name,stage='JETS_AND_NATIVE_JOIN',reason='BOUNDARY_POSITION_UNRESOLVED',previous_best_retained=self.best is not None)
+                        continue
                     initial=measure(base,sides,self.tol,math.degrees(self.angle),5,checkpoint=self.check)
                     self.candidate(name+'_COONS',base,initial,False)
-                    if not initial['position_sampled_ok'] or not initial['regularity_sampled_ok']: continue
+                    if not initial['position_sampled_ok'] or not initial['regularity_sampled_ok']:
+                        self.report.emit('STAGE_SKIPPED',layout=name,stage='JETS',reason='WHOLE_BASELINE_CHECK_FAILED',previous_best_retained=self.best is not None)
+                        continue
                     current=base
                     for step in range(4):
+                        self.report.emit('JET_START',layout=name,step=step,level='G1' if step==0 else 'G2',outer_rows_frozen=True)
                         current,iterations=refine(current,sides,curvature=step>0,checkpoint=self.check)
                         e=measure(current,sides,self.tol,math.degrees(self.angle),5,checkpoint=self.check)
                         self.candidate(name+'_JET'+str(step),current,e,False)
                 except StopExperiment: raise
                 except Exception as error: self.report.emit('LAYOUT_ERROR',name=name,error=error)
             if self.best is not None and self.best[2]['desired_sampled_met']: break
-        self.report.emit('SEARCH_END',attempts=self.attempts,best=self.best[0] if self.best else 'NONE',commit_allowed=False)
+        self.report.emit('SEARCH_END',attempts=self.attempts,best=self.best[0] if self.best else 'NONE',result='PREVIEW_AVAILABLE' if self.best else 'NO_CANDIDATE',commit_allowed=False)
     def preview(self):
         if self.best is None or self.cancelled: return
         R=self.R; import System.Drawing as Drawing
