@@ -1,0 +1,36 @@
+name: offline-opennurbs-reader
+on:
+  push:
+    branches: [tools-offline-opennurbs]
+    paths: ['.github/workflows/offline-opennurbs.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package-reader:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download public pinned reader only (no models or user data)
+        run: |
+          mkdir -p reader
+          python -m pip download --only-binary=:all: --no-deps rhino3dm==8.17.0 --dest reader
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          files=list(Path('reader').glob('*.whl'))
+          assert len(files)==1
+          sha=hashlib.sha256(files[0].read_bytes()).hexdigest()
+          assert sha=='b5dc1d6e0e8e0ee4f3bf6463eb3536b0154f74e7284ea590b8f328bee757a786'
+          Path('reader/SHA256.txt').write_text(sha+'  '+files[0].name+'\n')
+          Path('reader/SCOPE.txt').write_text('Public McNeel rhino3dm 8.17.0 reader only. No private geometry enters CI. Not RhinoCommon Join/MatchSrf. Installed production plugin unchanged.\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: offline-opennurbs-cp313-reader
+          path: reader/*
+          if-no-files-found: error
+          retention-days: 7
