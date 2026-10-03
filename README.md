@@ -1,208 +1,50 @@
 # Smart Skin
 
-Rhino 8 surface-assistance plug-in. The intended product is a small, dependable command that diagnoses irregular curve/edge frameworks, infers a likely surface strategy, builds candidates and returns a native Rhino result with an explanation.
+Rhino 8 surface-assistance plug-in. One product button and one live result window; native editable Brep output, or an explicit reason why construction/verification is blocked.
 
-## Current state: P07 measured G0/G1/G2 surface matching
+## Current patch: P07F1 / 0.0.13-p07f1
 
-P00 proved the repository → CI → artifact → Rhino field-test loop and is `VERIFIED` in Rhino 8.18.
+P07F1 fixes output-boundary verification for the contextual MatchSrf route. A cap boundary may contain one or multiple naked edges. The verifier retains edge/trim/face ownership, measures the whole loop, checks bidirectional sampled continuity, rejects ambiguous correspondence and extra boundary components, and preserves the existing strict Join proof. Every native direction variant now reports its own phase, topology, numeric gap and failure reason. Average is disabled with an explanation for ineligible trimmed targets.
 
-P01 added the first read-only geometry command:
+**This is not a replacement native solver.** P07's MatchSrf call and seed construction are unchanged. A large gap is now reported numerically, not hidden as a missing natural edge. A returned Brep, successful compilation, or a G2 request is not a verified G2 result.
 
-```text
-SmartSurfacePreflight
-```
+See [verification contract](docs/P07F1_VERIFICATION.md), [field test](docs/FIELD_TEST.md), [patch notes](docs/PATCH_NOTES.md), and [handoff](docs/HANDOFF.md). Read the exact GitHub Actions commit before installing its artifact. Native self-tests and the private opening remain **NOT VERIFIED** until their actual Rhino evidence is returned.
 
-Select curves, Brep edges, points, surfaces or polysurfaces. The command reports:
+## Interaction and safety
 
-- selection types, validity and bounding-box scale;
-- curve length, closure, planarity, degree and span count;
-- near endpoint gaps above document tolerance;
-- Brep face/edge counts, naked edges and edges not longer than tolerance;
-- document tolerance relative to the selected geometry scale;
-- bounded issue codes and a machine-readable PASS line.
+Select the boundary edges and finish with Enter. Their owning Breps are obtained automatically; no separate whole-object selection is necessary. The existing window controls G0/G1/G2, Refine, curvature tolerance, isocurve direction and preview appearance. Enter, Space or right-click adds the current verified result; Esc cancels. Average is an explicit source-replacement mode available only for supported natural untrimmed targets; it also requires attribute checks and proof that all selected seams joined. Match-only preserves sources and adds one cap. There is no CreatePatch fallback.
 
-P01 never creates or repairs geometry. The existing diagnostic command remains available:
+The first contextual build per Rhino process runs eight small disposable native validator regressions on the command/UI thread. They do not access RhinoDoc. Any regression failure blocks the matching route and reports its case. The supported input route remains five to eight naked Brep edges forming one closed loop. Existing bounded PlanarSrf, EdgeSrf and two-section Loft routes are unchanged. This release does not implement whole-object reconstruction, global fairness optimization, interior foldover certification or an analytic proof of continuous G2 along every point.
 
-```text
-SmartSurfaceVersion
-```
+## Build and installation
 
-The diagnostic and preflight commands verify that the active saved document
-object count is unchanged.
-
-P01F1 fixed a field-test regression in the Rhino adapter: selecting an entire
-`Extrusion` could be reported as the curve returned by `ObjRef.Curve()` instead
-of as the selected document object. The adapter now uses
-`GeometryComponentIndex` to separate sub-object picks from top-level objects.
-Whole extrusions report as `Extrusion`; a sub-selected Brep edge still reports
-as `BrepEdge`. Item labels include the parent object type and whether Rhino
-returned an object or sub-object component. Geometry remains read-only. The
-correction, managed installer lifecycle, cancellation path and restart behavior
-are `VERIFIED` in Rhino 8.18 for field build commit
-`550b74ff9f5bd8953d80c28560a9951d39214d55`.
-
-P02 adds a second read-only command:
-
-```text
-SmartSurfacePlan
-```
-
-It runs the verified snapshot/preflight path, clusters open-curve endpoints at
-document tolerance, classifies the selected frame and ranks native Rhino
-strategies. Current classifications cover a single closed boundary, a closed
-loop of segments, disconnected sections, an open chain, branched or mixed
-frames, point-guided inputs and surface-only context. Candidate strategies are
-`PlanarSrf`, `EdgeSrf`, `Loft`, `Patch` and `NetworkSrf`.
-
-P02 deliberately stops at an explained plan. It does not create preview or
-document geometry, does not repair gaps, and does not claim internal
-intersection families or G0/G1/G2 continuity that it has not measured.
-`SmartSurfacePlan` also verifies the document object count before returning.
-GitHub Actions run 9 restored, built, ran all 23 Core tests, packaged the
-plug-in and passed the installer lifecycle for commit
-`450bf1e28b77abdb5e17ca6b06fa5c1564963a5b`. Rhino 8.18 field testing verified
-the `PlanarSrf`, `EdgeSrf`, `Loft` and blocked open-chain routes, cancellation
-without mutation and the same section route after a full Rhino restart. P02 is
-`VERIFIED`.
-
-P03 adds the first geometry-producing command:
-
-```text
-SmartSurfaceBuild
-```
-
-It reuses the verified preflight and routing path, then admits only three
-bounded routes: one planar closed curve for `PlanarSrf`, two to four open
-curves forming a closed loop for `EdgeSrf`, or exactly two matching open/open
-or closed/closed sections for `Loft`. Construction is capped at four curves
-and 64 combined spans. A single Brep candidate is built from curve copies and
-shown through a temporary viewport conduit. The document changes only after
-explicit preview confirmation; Esc, a blocked route, or a native
-construction failure leaves `objects=N->N`. Confirmation adds exactly one native
-Brep while preserving every source object.
-
-P03 does not run `Patch` or `NetworkSrf`, sort more than two Loft sections,
-align closed-curve seams, repair source curves, trim, join, or score surface
-quality. Commit `acdcba9cc0586a769bae7a97ed61dadf74055573` passed GitHub Actions
-run 11 and Rhino 8.18 field tests for PlanarSrf, EdgeSrf, Loft, preview,
-Accept/Cancel, blocked input, Undo, save, and restart.
-
-The field test also exposed a diagnostic defect: `RhinoDoc.Objects.Count`
-includes deleted objects retained for Undo. Geometry and Undo behaved correctly,
-but later machine lines reported historical totals. P03F1 version
-`0.0.6-p03f1` replaces every direct table count with one active-object
-enumerator shared by Version, Preflight, Plan, and Build. Construction behavior
-is unchanged. P03F1 is `VERIFIED` for runtime commit
-`ada5c269c9d270e44952fcc297b611236c4a4782`. Existing CI and Rhino field evidence
-are summarized in [`docs/P03F1_CLOSURE.md`](docs/P03F1_CLOSURE.md).
-
-P04 version `0.0.8-p04` added one native `Smart Skin` toolbar and one button
-for `SmartSurfaceBuild`, through a same-name RUI beside the RHP. GitHub Actions
-run 13 passed for commit
-`a9e854dec93cde1a0e74d2596081d863803993ae`; Rhino 8.18 field evidence showed
-the visible toolbar invoking an accepted Loft with `objects=2->3`. The user
-accepted the toolbar and P04 is `VERIFIED` for that objective. See
-[`docs/P04_CLOSURE.md`](docs/P04_CLOSURE.md).
-
-P04F1 version `0.0.9-p04f1` keeps that toolbar and exposes all four existing
-commands as distinct buttons: Build, Plan, Preflight and Version. It adds no
-runtime command or solver and changes no production C# source. See
-[`docs/P04F1_TOOLBAR.md`](docs/P04F1_TOOLBAR.md).
-
-P05 version `0.0.10-p05` added the first context-aware soft hole-fill route.
-When five to eight selected Brep edges form one strict closed loop, routing
-keeps their owning trims instead of reducing them to detached curves.
-Construction requires every edge to be naked with one adjacent face, then asks
-Rhino for one trimmed tangent Patch using the trim normals. Ordinary curve
-loops, manifold edges and ambiguous trim ownership remain blocked or under
-review. The log says `G1_REQUESTED`; measured continuity and candidate ranking
-remain future work. Preview confirmation now uses Enter, Space or right-click;
-Esc cancels. See [`docs/PATCH_NOTES.md`](docs/PATCH_NOTES.md).
-
-The supplied P05 result model proved the bounded add/preserve behavior, but
-later measurement rejected its geometry: the cap missed the intended boundary
-by up to about `0.215 mm` in a `0.01 mm` document and did not establish G1/G2.
-
-P06 version `0.0.11-p06` replaced the temporary four-button diagnostic piano
-with one visible `Smart Skin` button. After selection and routing, one modeless
-settings window controls the live in-memory result. Patch exposes Balanced,
-Stiff, Flexible and Detailed presets plus U/V spans, boundary sample spacing,
-flexibility, tangency, trim and preview appearance. PlanarSrf, EdgeSrf and Loft
-still use their bounded native construction and show the same result window
-with Patch-only controls disabled. Enter, Space or right-click adds exactly one
-Brep; Esc or closing the window adds nothing. This interaction is accepted;
-the underlying contextual Patch result is not.
-
-P07 version `0.0.12-p07` requires Rhino 8.21 and replaces the rejected
-contextual `CreatePatch` path with Rhino's native MatchSrf API. The same window
-now exposes Position/G0, Tangency/G1, Curvature/G2, Refine, Average surfaces
-and isocurve direction. It measures maximum boundary gap, adjacent-face normal
-angle and cross-boundary radius-of-curvature deviation with bounded span-scaled
-near-end sampling, and blocks confirmation
-unless the selected continuity passes. The route is logged as `MATCH_SRF` and
-must also join to a disposable copy of the neighboring Breps as one closed
-interior seam. Match-only then adds one cap without changing sources. For
-all-natural target-edge loops, explicit Average previews the
-changed context and replaces only the recorded owning Breps after proving every
-selected seam joined. Rhino's native Average limitation is reported for
-trimmed target edges instead of being silently approximated.
-
-## Projects
-
-- `src/SmartSkin.Core` — Rhino-independent code.
-- `src/SmartSkin.Rhino8` — Rhino 8.21+ `.rhp`, targeting the `net48` compatibility baseline.
-- `tests/SmartSkin.Core.Tests` — console/unit tests.
-
-## Build
-
-Requirements for a Windows developer machine:
-
-- Visual Studio 2022 or the .NET SDK tooling.
-- .NET 8 SDK for tests.
-- .NET Framework 4.8 targeting pack.
-- Rhino 8.21 or later for loading and field testing P07.
+- Windows; Rhino **8.21 or newer** for the MatchSrf API.
+- .NET SDK for building, .NET 8 for Core tests, and .NET Framework 4.8 targeting pack.
+- Rhino-host assembly keeps the net48 compatibility target; Core targets netstandard2.0. A previous P07 build was loaded in Rhino 8.35 under .NET 8; that is not a substitute for loading this exact build.
 
 ```powershell
 dotnet restore SmartSkin.sln
 dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=local
 dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --no-build
-.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.12-p07 -Commit local
+.\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.13-p07f1 -Commit local
 ```
 
-GitHub Actions performs the same build on Windows and publishes a versioned ZIP for the Rhino test.
+The hosted Windows workflow builds the actual RHP with warnings as errors, runs Core tests, checks the unchanged native RUI, packages a versioned ZIP and tests the managed installer in isolated directories/registry keys. It does **not** run licensed Rhino native geometry. Its artifacts explicitly state that boundary.
 
-The ZIP contains `INSTALL.cmd` and `UNINSTALL.cmd`. `INSTALL.cmd` keeps one managed copy at `%LOCALAPPDATA%\SmartSkin\Rhino8\current`, updates the Rhino 8 per-user registry entry for the fixed Smart Skin plug-in GUID, and removes the known binaries from the previously registered Smart Skin location. Rhino must be closed during either operation.
+Extract the field-test ZIP, close Rhino and run `INSTALL.cmd` normally. It keeps one managed copy at `%LOCALAPPDATA%\SmartSkin\Rhino8\current` and updates the fixed per-user plug-in registration. Do not manually register another RHP from a download folder. `UNINSTALL.cmd` removes the managed installation; Rhino must be closed. Installation is not a separate field test.
 
-Repository upload instructions: [`docs/UPLOAD.md`](docs/UPLOAD.md).
+## Historical milestones
 
-## Test in Rhino
+P00 proved the build/load loop; P01/P01F1 added read-only preflight and corrected sub-object identity; P02 added topology routing. P03 established bounded PlanarSrf/EdgeSrf/Loft preview and commit. P03F1 corrected active-object counts and is field-verified at `ada5c269c9d270e44952fcc297b611236c4a4782`. P04 established the native toolbar; P04F1 temporarily exposed diagnostic buttons. P05 introduced a contextual Patch, whose geometry was later rejected. P06 established the accepted one-button/live-window interaction; its Patch geometry was not accepted. P07 (`27a4d1e2f0e1b1363915e72cb674147f0a42eddd`) replaced that route with measured MatchSrf on Rhino 8.21+. P07F1 addresses its verifier failure without claiming that the private opening already passes.
 
-Extract the artifact, close Rhino and run `INSTALL.cmd` normally, then follow
-[`docs/FIELD_TEST.md`](docs/FIELD_TEST.md). Installation is not a separate
-field test; report it only if an actual problem occurs. Do not manually
-register the `.rhp` from the extracted download folder. A green CI run is not
-equivalent to the focused one-button live-preview check.
+Earlier detailed notes remain in Git history and `docs/P03F1_CLOSURE.md`, `docs/P04_CLOSURE.md` and `docs/P04F1_TOOLBAR.md`. The Google Drive journal is for development history, not code or release bundles.
 
-## Development sequence
+## Projects and data
 
-1. P00 — reproducible build/load loop (`VERIFIED`).
-2. P01 — read-only GeometryReport/Preflight.
-3. P01F1 — preserve top-level versus sub-object selection identity (`VERIFIED`).
-4. P02 — input topology classification and candidate routing without geometry mutation (`VERIFIED`).
-5. P03 — bounded PlanarSrf/EdgeSrf/Loft candidate preview and explicit one-Brep accept (`VERIFIED` construction behavior on commit `acdcba9cc0586a769bae7a97ed61dadf74055573`).
-6. P03F1 — exclude deleted Undo records from all document-count diagnostics (`VERIFIED` on commit `ada5c269c9d270e44952fcc297b611236c4a4782`).
-7. P04 — native one-button Build toolbar, version `0.0.8-p04` (`VERIFIED` on commit `a9e854dec93cde1a0e74d2596081d863803993ae`).
-8. P04F1 — expand the accepted toolbar to all four existing commands, version `0.0.9-p04f1`.
-9. P05 — contextual tangent Patch for one five-to-eight-edge Brep boundary, version `0.0.10-p05`.
-10. P06 — one product button and one live result-settings window, version `0.0.11-p06`.
-11. P07 — measured MatchSrf G0/G1/G2, Refine and explicit Average surfaces, version `0.0.12-p07`.
+`src/SmartSkin.Core`: Rhino-independent analysis and boundary graph. `src/SmartSkin.Rhino8`: Rhino host, native verification and preview. `tests/SmartSkin.Core.Tests`: native-free regression suite. Private models, field evidence, secrets and downloaded forum models without redistribution permission must never be committed to this public repository. Native fixtures are synthetic and created in memory.
 
-## Data and licensing
+## Official references
 
-The repository is public. Do not commit secrets, private models, user evidence or downloaded forum `.3dm` files unless redistribution rights are confirmed. Synthetic and explicitly cleared fixtures will be stored separately from raw research material.
-
-## Official Rhino references
-
-- [Your First Plugin (Windows)](https://developer.rhino3d.com/guides/rhinocommon/your-first-plugin-windows/)
-- [Moving to .NET Core](https://developer.rhino3d.com/en/guides/rhinocommon/moving-to-dotnet-core/)
-- [Rhino Package Manager guides](https://developer.rhino3d.com/en/guides/yak/)
+- [Your first Rhino plug-in](https://developer.rhino3d.com/guides/rhinocommon/your-first-plugin-windows/)
+- [Rhino runtime compatibility](https://developer.rhino3d.com/guides/rhinocommon/moving-to-dotnet-core/)
+- [MatchSrf](https://docs.mcneel.com/rhino/8/help/en-us/commands/matchsrf.htm)

@@ -189,7 +189,7 @@ public sealed class GeometryPreflightAnalyzerTests
 
         var line = report.ToMachineLine(identity, 35, 35);
 
-        Assert.StartsWith("SMARTSKIN_P07 PASS", line);
+        Assert.StartsWith($"SMARTSKIN_{identity.Patch} PASS", line);
         Assert.Contains("status=READY", line);
         Assert.Contains("selected=1", line);
         Assert.Contains("valid=1", line);

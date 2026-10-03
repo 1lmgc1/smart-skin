@@ -11,9 +11,9 @@ public sealed class BuildIdentityTests
     {
         var identity = BuildIdentity.FromAssembly(Assembly.GetExecutingAssembly());
 
-        Assert.False(string.IsNullOrWhiteSpace(identity.Version));
+        Assert.Equal("0.0.13-p07f1", identity.Version);
         Assert.False(string.IsNullOrWhiteSpace(identity.Commit));
-        Assert.Equal("P07", identity.Patch);
+        Assert.Equal("P07F1", identity.Patch);
     }
 
     [Fact]
@@ -23,7 +23,7 @@ public sealed class BuildIdentityTests
 
         var line = identity.ToMachineLine(17);
 
-        Assert.StartsWith("SMARTSKIN_P07 PASS", line);
+        Assert.StartsWith("SMARTSKIN_P07F1 PASS", line);
         Assert.Contains("version=", line);
         Assert.Contains("commit=", line);
         Assert.EndsWith("objects=17", line);

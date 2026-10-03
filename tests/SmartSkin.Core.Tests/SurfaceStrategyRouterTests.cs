@@ -206,7 +206,7 @@ public sealed class SurfaceStrategyRouterTests
 
         var line = report.ToMachineLine(identity, 12, 12);
 
-        Assert.StartsWith("SMARTSKIN_P07 PASS", line);
+        Assert.StartsWith($"SMARTSKIN_{identity.Patch} PASS", line);
         Assert.Contains("route_status=READY", line);
         Assert.Contains("topology=SINGLE_CLOSED_BOUNDARY", line);
         Assert.Contains("primary=PLANAR_SRF", line);
@@ -241,41 +241,25 @@ public sealed class SurfaceStrategyRouterTests
             spanCount: 4);
     }
 
-    private static GeometrySnapshot OpenCurve(
-        string label,
-        Point3Value start,
-        Point3Value end)
+    private static GeometrySnapshot OpenCurve(string label, Point3Value start, Point3Value end)
     {
         return OpenCurve(label, GeometryKind.Curve, start, end);
     }
 
-    private static GeometrySnapshot OpenEdge(
-        string label,
-        Point3Value start,
-        Point3Value end)
+    private static GeometrySnapshot OpenEdge(string label, Point3Value start, Point3Value end)
     {
         return OpenCurve(label, GeometryKind.BrepEdge, start, end);
     }
 
-    private static GeometrySnapshot OpenCurve(
-        string label,
-        GeometryKind kind,
-        Point3Value start,
-        Point3Value end)
+    private static GeometrySnapshot OpenCurve(string label, GeometryKind kind, Point3Value start, Point3Value end)
     {
         return new GeometrySnapshot(
             label,
             kind,
             true,
             new Bounds3Value(
-                new Point3Value(
-                    Math.Min(start.X, end.X),
-                    Math.Min(start.Y, end.Y),
-                    Math.Min(start.Z, end.Z)),
-                new Point3Value(
-                    Math.Max(start.X, end.X),
-                    Math.Max(start.Y, end.Y),
-                    Math.Max(start.Z, end.Z))),
+                new Point3Value(Math.Min(start.X, end.X), Math.Min(start.Y, end.Y), Math.Min(start.Z, end.Z)),
+                new Point3Value(Math.Max(start.X, end.X), Math.Max(start.Y, end.Y), Math.Max(start.Z, end.Z))),
             length: start.DistanceTo(end),
             isClosed: false,
             startPoint: start,
@@ -285,21 +269,10 @@ public sealed class SurfaceStrategyRouterTests
             spanCount: 1);
     }
 
-    private static Point3Value Point(double x, double y, double z = 0.0)
-    {
-        return new Point3Value(x, y, z);
-    }
+    private static Point3Value Point(double x, double y, double z = 0.0) => new Point3Value(x, y, z);
 
-    private static Bounds3Value Bounds(
-        double minX,
-        double minY,
-        double minZ,
-        double maxX,
-        double maxY,
-        double maxZ)
+    private static Bounds3Value Bounds(double minX, double minY, double minZ, double maxX, double maxY, double maxZ)
     {
-        return new Bounds3Value(
-            new Point3Value(minX, minY, minZ),
-            new Point3Value(maxX, maxY, maxZ));
+        return new Bounds3Value(new Point3Value(minX, minY, minZ), new Point3Value(maxX, maxY, maxZ));
     }
 }
