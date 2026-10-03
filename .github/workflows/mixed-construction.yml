@@ -1,8 +1,8 @@
-name: mixed-construction-p08b2
+name: mixed-construction-p08b3
 on:
   push:
     branches: [p08-mixed-boundary]
-    paths: ['experiments/P08B.Construction/**', '.github/workflows/mixed-construction.yml', 'docs/P08B2_CONSTRUCTION.md']
+    paths: ['experiments/P08B.Construction/**', '.github/workflows/mixed-construction.yml', 'docs/P08B3_STABILITY.md']
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,7 +21,7 @@ jobs:
           python-version: '3.11'
       - name: Install test-only dependencies (not required in user's Rhino)
         run: python -m pip install numpy==2.2.6 scipy==1.15.3 rhino3dm==8.17.0
-      - name: Constructive geometry, independent numerical references, helpers and I/O
+      - name: Constructive geometry, independent numerical references, guards and I/O
         run: |
           set -o pipefail
           mkdir -p construction-artifact
@@ -32,28 +32,38 @@ jobs:
           set -o pipefail
           python experiments/P08B.Construction/verify_opennurbs.py 2>&1 | tee construction-artifact/opennurbs.txt
           python experiments/P08B.Construction/verify_adaptive_opennurbs.py 2>&1 | tee construction-artifact/adaptive-opennurbs.txt
+          python experiments/P08B.Construction/verify_stability_opennurbs.py 2>&1 | tee construction-artifact/stability-opennurbs.txt
           test -s construction-artifact/opennurbs-results.json
           test -s construction-artifact/P08B2_synthetic_results.3dm
           test -s construction-artifact/P08B2F2_adaptive_synthetic.3dm
+          test -s construction-artifact/P08B3_stable_synthetic.3dm
+          test -s construction-artifact/stability-opennurbs.json
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
       - name: Compile against RhinoCommon 8.21 public APIs only
         run: dotnet build experiments/P08B.Construction/ApiCheck.csproj -c Release
-      - name: Bundle one user script and state limitations
+      - name: Bundle and execute one-file numerical smoke test (not Rhino)
         run: |
           python experiments/P08B.Construction/bundle.py
           python -m py_compile construction-artifact/SmartSkin_MixedBoundary_Prototype.py
-          cp docs/P08B2_CONSTRUCTION.md construction-artifact/
-          python - <<'PY'
-          import pathlib,os,hashlib
+          cp docs/P08B3_STABILITY.md construction-artifact/
+          PYTHONPATH=experiments/P08B.Construction python - <<'PY'
+          import importlib.util, pathlib, os, hashlib
+          from test_stability import plane, boundaries_of, bump
           p=pathlib.Path('construction-artifact/SmartSkin_MixedBoundary_Prototype.py')
-          pathlib.Path('construction-artifact/verification-scope.txt').write_text('experiment=P08B.2F2\ncommit='+os.environ['GITHUB_SHA']+'\nscript_sha256='+hashlib.sha256(p.read_bytes()).hexdigest()+'\ngeometry=synthetic_BSpline_construction_and_OpenNURBS_executed\nboundary_fit=adaptive_nonuniform_simple_knots;independent_dense_checks\nrhino_api=compile_only\nrhino_join_and_UI=NOT_RUN\nprivate_hole=NOT_VERIFIED\nplugin_integration=NOT_IMPLEMENTED\n')
+          spec=importlib.util.spec_from_file_location('bundled',p)
+          module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+          assert module.EXPERIMENT=='P08B.3' and module.CODE_COMMIT==os.environ['GITHUB_SHA']
+          result,evidence=module.stable_solve(plane(),boundaries_of(bump),steps=8)
+          assert result is not None and evidence['desired_sampled_met'] and evidence['shape']['ok']
+          print('P08B3_BUNDLE_NUMERIC_SMOKE PASS | Rhino=NOT_RUN')
+          pathlib.Path('construction-artifact/verification-scope.txt').write_text('experiment=P08B.3\ncommit='+os.environ['GITHUB_SHA']+'\nscript_sha256='+hashlib.sha256(p.read_bytes()).hexdigest()+'\ngeometry=stabilized_synthetic_BSpline_and_OpenNURBS_executed\nshape=per_knot_cell_numerical_Bernstein_and_envelope;not_global_intersection_certificate\nrefinement=bounded_vector_G1;G2_only_after_measured_G1\nreport=unbuffered_UTF8_sequence_integrity_and_output_net\nrhino_api=compile_only\nrhino_join_and_UI=NOT_RUN\nprivate_hole=NOT_VERIFIED\nplugin_integration=NOT_IMPLEMENTED\n')
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: SmartSkin-P08B2F2-construction-${{ github.run_number }}-${{ github.sha }}
+          name: SmartSkin-P08B3-construction-${{ github.run_number }}-${{ github.sha }}
           path: construction-artifact/*
           if-no-files-found: error
           retention-days: 30
