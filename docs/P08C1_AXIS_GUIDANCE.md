@@ -45,7 +45,7 @@ https://www.xnurbs.com/whats-new/
 https://www.xnurbs.com/tutorials/
 
 Rhino Brep geometry separates 3D edge curves, 2D trim curves and supporting surfaces. Changing a shared contour requires consistent topology, not moving a detached curve:
-https://developer.rhino3d.com/guides/general/essential-mathematics/surfaces/
+https://developer.rhino3d.com/guides/grasshopper/csharp-essentials/3-rhinocommon-geometry/
 
 ## Reproducible synthetic test
 
