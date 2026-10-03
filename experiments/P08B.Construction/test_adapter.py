@@ -29,8 +29,11 @@ class AdapterTests(unittest.TestCase):
         base=[{'key':str(i),'flip':False} for i in range(6)]; features={'3','4'}
         expected=four_side_layouts(base,features)
         for shift in range(6): self.assertEqual(expected,four_side_layouts(base[shift:]+base[:shift],features))
-    def test_fragmented_feature_chain_is_explicitly_unsupported(self):
-        with self.assertRaises(ValueError): four_side_layouts([{'key':str(i),'flip':False} for i in range(6)],{'1','4'})
+    def test_separated_feature_chains_keep_each_selected_role(self):
+        edges=[{'key':str(i),'flip':False} for i in range(6)]; features={'1','4'}
+        layout=four_side_layouts(edges,features)[0]
+        self.assertEqual({e['key'] for s in ('bottom','top') for e in layout[s]},features)
+        self.assertEqual([len(layout[s]) for s in SIDES],[1,2,1,2])
     def test_reversal_does_not_mutate_source_items(self):
         a=[{'key':'a','flip':False},{'key':'b','flip':True}];b=flip_items(a)
         self.assertEqual(a,[{'key':'a','flip':False},{'key':'b','flip':True}]);self.assertEqual(b[0]['key'],'b'); self.assertFalse(b[0]['flip'])

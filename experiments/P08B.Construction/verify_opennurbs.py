@@ -8,12 +8,13 @@ import math
 import rhino3dm as rg
 from mixed_kernel import *
 from synthetic_cases import boundaries,curved_boundaries
+from compound_fixture import opposed_boundaries
 out=Path(os.environ.get('ARTIFACT_DIR','construction-artifact'));out.mkdir(exist_ok=True,parents=True)
-model=rg.File3dm(); model.ApplicationName='Smart Skin P08B.2 synthetic construction experiment'
+model=rg.File3dm(); model.ApplicationName='Smart Skin P08B.2F1 synthetic construction experiment'
 model.StartSectionComments='Synthetic fixtures only. No private user model. OpenNURBS verification is not Rhino Join/field acceptance.'
 report={'scope':'ACTUAL_CONSTRUCTION_AND_OPENNURBS;NOT_RHINOCOMMON_JOIN','rhino3dm':rg.__version__,'cases':[]}
 expected=[]
-for name,f in [('mixed_4G2_2G0',boundaries(sharp_top=True,split=True)),('curved_all_G2',curved_boundaries())]:
+for name,f in [('mixed_4G2_2G0',boundaries(sharp_top=True,split=True)),('curved_all_G2',curved_boundaries()),('opposed_compound_4G0_2curvedG2',opposed_boundaries())]:
     pool=solve(f,n=8,steps=4); label,patch,e=pool.best
     assert e['desired_sampled_met'],(name,e)
     s=rg.NurbsSurface.Create(3,False,patch.p+1,patch.p+1,patch.n,patch.n)

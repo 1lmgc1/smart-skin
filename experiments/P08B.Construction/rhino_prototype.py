@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P08B.2 Rhino adapter: one constructive preview experiment, never a document edit.
+"""P08B.2F1 Rhino adapter: one constructive preview experiment, never a document edit.
 Run the BUNDLED file with _RunPythonScript. No installation or numpy is required.
 """
 from __future__ import division
@@ -11,6 +11,7 @@ import json
 import hashlib
 import traceback
 
+EXPERIMENT = 'P08B.2F1'
 CODE_COMMIT = 'WORKTREE'
 try: text_type=unicode
 except NameError: text_type=str
@@ -44,7 +45,7 @@ class Report(object):
 def save_path():
     import rhinoscriptsyntax as rs
     while True:
-        path=rs.SaveFileName(u'Smart Skin: сохранить отчёт построения P08B.2','Text files (*.txt)|*.txt||',None,'SmartSkin_Mixed_'+time.strftime('%Y%m%d_%H%M%S')+'.txt','txt')
+        path=rs.SaveFileName(u'Smart Skin: сохранить отчёт построения '+EXPERIMENT,'Text files (*.txt)|*.txt||',None,'SmartSkin_Mixed_'+time.strftime('%Y%m%d_%H%M%S')+'.txt','txt')
         if not path: return None
         path=text(path)
         if not path.lower().endswith('.txt'): path+=u'.txt'
@@ -107,19 +108,48 @@ class Chain(object):
 def flip_items(items):
     return [dict(e,flip=not e['flip']) for e in reversed(items)]
 
+def boundary_role_runs(ordered,features):
+    """Partition an already ordered CLOSED ring by explicit role, not by edge count.
+
+    This does not join/split/rebuild curves. Every item keeps its original key,
+    edge/trim/face data and traversal direction. Geometry closure is checked by
+    capture(), not invented by this metadata-only helper.
+    """
+    keys=[e['key'] for e in ordered]; n=len(keys); features=set(features)
+    if n<4 or n>8: raise ValueError('LAYOUT_REQUIRES_FOUR_TO_EIGHT_SOURCE_EDGES')
+    if len(set(keys))!=n: raise ValueError('LAYOUT_DUPLICATE_SOURCE_KEY')
+    if not features.issubset(set(keys)): raise ValueError('LAYOUT_UNKNOWN_G0_KEY')
+    if not features or len(features)==n: raise ValueError('MIXED_CONTRACT_REQUIRED')
+    starts=[i for i in range(n) if keys[i] in features and keys[i-1] not in features]
+    # Canonical cyclic start affects only U/V placement, never a source's role.
+    start=min(starts,key=lambda i:keys[i])
+    ring=list(ordered[start:])+list(ordered[:start]); runs=[]
+    for e in ring:
+        role=e['key'] in features
+        if not runs or (runs[-1][0]['key'] in features)!=role: runs.append([])
+        runs[-1].append(dict(e))
+    return runs
+
 def four_side_layouts(ordered,features):
-    starts=[i for i,e in enumerate(ordered) if e['key'] in features and ordered[i-1]['key'] not in features]
-    if len(starts)!=1: raise ValueError('EXPERIMENT_NEEDS_ONE_CONTIGUOUS_G0_CHAIN')
-    ring=ordered[starts[0]:]+ordered[:starts[0]]; k=0
-    while k<len(ring) and ring[k]['key'] in features: k+=1
-    sharp=ring[:k]; smooth=ring[k:]
-    if len(smooth)<3: raise ValueError('EXPERIMENT_NEEDS_THREE_SMOOTH_SIDES')
+    runs=boundary_role_runs(ordered,features)
+    if len(runs)==4:
+        # Two opposing G0 chains, separated by two G2 chains. A logical side
+        # may contain several source edges; none is relabelled or discarded.
+        # In tensor-product coordinates top and left run opposite the ring.
+        return [{'bottom':runs[0],'right':runs[1],
+                 'top':flip_items(runs[2]),'left':flip_items(runs[3])}]
+    if len(runs)!=2:
+        raise ValueError('LAYOUT_UNSUPPORTED_ROLE_RUNS: g0_chains='+str(len(runs)//2)
+                         +'; four_side_route_supports_one_or_two; no_roles_changed')
+    # Preserve the existing one-feature-chain search without requiring it for
+    # every input. Its three smooth sides are partitions of the other run.
+    sharp,smooth=runs
+    if len(smooth)<3: raise ValueError('ONE_G0_CHAIN_NEEDS_THREE_SMOOTH_SOURCE_INTERVALS')
     layouts=[]
     for a in range(1,len(smooth)-1):
         for b in range(a+1,len(smooth)):
-            layouts.append({'bottom':sharp,'right':smooth[:a],'top':flip_items(smooth[a:b]),'left':flip_items(smooth[b:])})
-    # Balanced opposing chains first; this affects exploration order only,
-    # never the G0/G2 role or identity of a selected boundary.
+            layouts.append({'bottom':sharp,'right':smooth[:a],
+                            'top':flip_items(smooth[a:b]),'left':flip_items(smooth[b:])})
     layouts.sort(key=lambda d:abs(len(d['left'])-len(d['right']))+abs(len(d['bottom'])-len(d['top'])))
     return layouts[:6]
 
@@ -153,7 +183,7 @@ class Experiment(object):
         return [go.Object(i) for i in range(go.ObjectCount)]
     def capture(self):
         self.before=self.count()
-        refs=self.select('P08B.2: select all opening Brep edges (same six), then Enter',5,8)
+        refs=self.select(EXPERIMENT+': select ALL opening Brep edges, then Enter',5,8)
         self.refs=refs; items=[]; seen=set(); faces=0; edges=0
         for ref in refs:
             e=ref.Edge()
@@ -179,7 +209,7 @@ class Experiment(object):
         end=order[-1]['edge'].PointAtStart if order[-1]['flip'] else order[-1]['edge'].PointAtEnd
         if end.DistanceTo(order[0]['edge'].PointAtStart)>self.tol: raise ValueError('OPEN_BOUNDARY')
         self.ordered=order
-        refs_g0=self.select('P08B.2: select ONLY the two end-face opening edges to keep SHARP (G0), then Enter',1,0)
+        refs_g0=self.select(EXPERIMENT+': select ALL source edge segments to keep G0 (include every segment of each chosen side), then Enter',1,0)
         identities={(str(r.ObjectId),r.Edge().EdgeIndex) for r in refs_g0 if r.Edge() is not None}
         if len(identities)!=len(refs_g0) or not identities.issubset(seen): raise ValueError('G0_SELECTION_MUST_BE_SUBSET_OF_OPENING')
         features={e['key'] for e in order if e['identity'] in identities}
@@ -286,7 +316,22 @@ class Experiment(object):
             if cap is not None: cap.Dispose()
     def run(self):
         self.report.emit('BEGIN',experiment=EXPERIMENT,commit=CODE_COMMIT,rhino=self.R.RhinoApp.Version,tol=self.tol,angle_deg=math.degrees(self.angle),curvature_percent=5,mode='PREVIEW_ONLY;FIXED_PARENTS;NO_DOCUMENT_WRITES')
-        self.capture(); layouts=four_side_layouts(self.ordered,self.features); self.started=time.time()
+        self.capture(); runs=boundary_role_runs(self.ordered,self.features)
+        self.report.emit('ROLE_CHAINS',g0_chains=len(runs)//2,g2_chains=len(runs)//2,
+                         source_edges_per_chain=','.join(str(len(r)) for r in runs),
+                         roles=';'.join('G0' if r[0]['key'] in self.features else 'G2' for r in runs))
+        layouts=four_side_layouts(self.ordered,self.features); self.started=time.time()
+        for index,layout in enumerate(layouts):
+            self.report.emit('LAYOUT_PLAN',layout=index,logical_sides=4,
+                             source_edges=sum(len(layout[s]) for s in SIDES),
+                             side_edge_counts=','.join(str(len(layout[s])) for s in SIDES))
+            for side in SIDES:
+                items=layout[side]
+                self.report.emit('SIDE',layout=index,side=side,source_edges=len(items),
+                                 role='G0_FEATURE' if items[0]['key'] in self.features else 'G2',
+                                 keys=';'.join(e['key'] for e in items),
+                                 flips=','.join(str(e['flip']) for e in items),
+                                 source_intervals_preserved=True)
         for n in (10,16):
             for index,layout in enumerate(layouts):
                 self.check(); name='layout'+str(index)+'_n'+str(n)
@@ -321,7 +366,7 @@ class Experiment(object):
         conduit=Preview(); getter=R.Input.Custom.GetOption()
         try:
             conduit.Enabled=True; self.doc.Views.Redraw()
-            getter.SetCommandPrompt('P08B.2 PREVIEW ONLY: Enter or Esc closes; no object is added. Full per-edge result is in TXT')
+            getter.SetCommandPrompt(EXPERIMENT+' PREVIEW ONLY: Enter or Esc closes; no object is added. Full per-edge result is in TXT')
             getter.AcceptNothing(True); getter.Get()
             self.report.emit('PREVIEW_CLOSED',candidate=self.best[0],added=0)
         finally:
