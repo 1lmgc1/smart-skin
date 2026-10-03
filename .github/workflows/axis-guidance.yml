@@ -1,0 +1,56 @@
+name: axis-guidance-p08c1
+
+on:
+  push:
+    branches: [p08-axis-guidance]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-construction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Released plugin and previous experiments unchanged
+        run: git diff --exit-code 265f8ffe6b204241f2c5235e7a27e863d7ddef26 HEAD -- src tests scripts Directory.Build.props VERSION experiments/P08B.Construction .github/workflows/build.yml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install independent test dependencies
+        run: python -m pip install numpy==2.2.6 scipy==1.15.3 rhino3dm==8.17.0
+      - name: Syntax and legacy grammar (not IronPython execution)
+        run: |
+          python -m py_compile experiments/P08C.AxisGuidance/axis_guided_ribbons.py
+          python - <<'PY'
+          from pathlib import Path
+          from lib2to3.refactor import RefactoringTool
+          p=Path('experiments/P08C.AxisGuidance/axis_guided_ribbons.py')
+          RefactoringTool([]).refactor_string(p.read_text(),str(p))
+          print('P08C1_GRAMMAR PASS; actual_IronPython=NOT_RUN')
+          PY
+      - name: Actual synthetic construction and native OpenNURBS roundtrip
+        run: |
+          set -o pipefail
+          mkdir -p axis-artifact
+          PYTHONPATH=experiments/P08C.AxisGuidance python -m unittest discover -s experiments/P08C.AxisGuidance -p 'test_*.py' -v 2>&1 | tee axis-artifact/tests.txt
+      - name: Record exact artifact verification scope
+        run: |
+          cp experiments/P08C.AxisGuidance/axis_guided_ribbons.py axis-artifact/
+          cp experiments/P08C.AxisGuidance/test_axis_guided_ribbons.py axis-artifact/
+          cp docs/P08C1_AXIS_GUIDANCE.md axis-artifact/
+          python - <<'PY'
+          import pathlib,hashlib,os
+          p=pathlib.Path('axis-artifact/axis_guided_ribbons.py')
+          pathlib.Path('axis-artifact/verification-scope.txt').write_text('experiment=P08C.1\ncommit='+os.environ['GITHUB_SHA']+'\nkernel_sha256='+hashlib.sha256(p.read_bytes()).hexdigest()+'\nconstruction=synthetic_numeric_and_OpenNURBS_executed\nprivate_model=NOT_SENT_TO_CI\nRhino_UI_and_Join=NOT_RUN\nslider_integration=NOT_IMPLEMENTED\ncontour_healing=NOT_IMPLEMENTED\ncommit_path=NONE\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SmartSkin-P08C1-axis-${{ github.run_number }}-${{ github.sha }}
+          path: axis-artifact/*
+          if-no-files-found: error
+          retention-days: 30
