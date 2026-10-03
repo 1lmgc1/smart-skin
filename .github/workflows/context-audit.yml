@@ -23,7 +23,7 @@ jobs:
         run: git diff --exit-code a9b8281f9475fb29d38839614b1781ff21b26677 HEAD -- src Directory.Build.props VERSION .github/workflows/build.yml
       - name: Require grammar checker
         run: python -c 'import lib2to3.refactor'
-      - name: Syntax and pure helper tests (no Rhino)
+      - name: Syntax, I/O, mock dialogs and pure helpers (no Rhino)
         run: |
           python -m py_compile scripts/audit/SmartSkin_ContextAudit.py
           python -m unittest discover -s scripts/audit -p 'test_context_audit.py' -v
@@ -35,9 +35,9 @@ jobs:
           import hashlib, pathlib, os
           p = pathlib.Path('audit-artifact/verification-scope.txt')
           b = pathlib.Path('audit-artifact/SmartSkin_ContextAudit.py').read_bytes()
-          p.write_text('audit=P08A.1\ncommit=' + os.environ['GITHUB_SHA']
+          p.write_text('audit=P08A.2\ncommit=' + os.environ['GITHUB_SHA']
             + '\nscript_sha256=' + hashlib.sha256(b).hexdigest()
-            + '\nchecks=syntax,grammar,pure_helpers,source_guards\nrhino_execution=NOT_RUN\ngeometry=NOT_VERIFIED\n')
+            + '\nchecks=syntax,grammar,pure_helpers,source_guards,TXT_IO,mocked_dialogs\nrhino_execution=NOT_RUN\ngeometry=NOT_VERIFIED\n')
           PY
       - uses: actions/upload-artifact@v4
         with:

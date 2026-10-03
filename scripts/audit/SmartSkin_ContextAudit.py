@@ -1,14 +1,18 @@
 # -*- coding: utf-8 -*-
-"""P08A.1: read-only audit of the installed P07F2 context and matching route.
+"""P08A.2: geometry-read-only audit with a user-selected streaming TXT report.
 Run in Rhino 8 with _RunPythonScript. IronPython 2.7 / Python 3 syntax compatible.
 Private calls are pinned to one exact assembly and never invoke commit methods.
 This is NOT a new solver and never enables acceptance or edits RhinoDoc geometry.
+Only the report TXT selected in the save dialog is written; there are no network calls.
 """
 from __future__ import print_function
+import io
+import os
 import math
 import time
+import traceback
 
-AUDIT_ID = "P08A.1"
+AUDIT_ID = "P08A.2"
 EXPECTED_VERSION = "0.0.14-p07f2"
 EXPECTED_COMMIT = "a9b8281f9475fb29d38839614b1781ff21b26677"
 MAX_SECONDS = 45.0
@@ -42,7 +46,114 @@ def clean(value):
         return "n/a"
     if isinstance(value, float):
         return "%.12g" % value if finite(value) else "n/a"
-    return str(value).replace("\r", " ").replace("\n", " ").replace("|", "/")
+    return text_value(value).replace("\r", " ").replace("\n", " ").replace("|", "/")
+
+
+try:
+    TEXT_TYPE = unicode
+except NameError:
+    TEXT_TYPE = str
+
+
+def text_value(value):
+    """Keep Russian paths and .NET/Python Unicode messages intact in both engines."""
+    if isinstance(value, TEXT_TYPE):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return TEXT_TYPE(value)
+
+
+def txt_path(path):
+    path = text_value(path)
+    # Never turn an explicitly chosen model/script path into an overwrite target.
+    # A non-TXT name becomes name.ext.txt instead of replacing its extension.
+    return path if path.lower().endswith(".txt") else path + u".txt"
+
+
+class TextReport(object):
+    """Full UTF-8/BOM report, flushed per record; console is only a progress display.
+
+    Memory retains the same records for a user-directed retry if file I/O fails.
+    Write errors do not interrupt geometry disposal or the final safety checks.
+    """
+    def __init__(self, path, console=None):
+        self.path = txt_path(path)
+        self.console = console
+        self.lines = []
+        self.error = None
+        self.closed = False
+        self.stream = io.open(self.path, "w", encoding="utf-8-sig", newline="")
+
+    def say(self, message):
+        if self.console is not None:
+            try:
+                self.console(text_value(message))
+            except Exception:
+                # Console display must not prevent the TXT from being saved.
+                pass
+
+    def write(self, message):
+        text = text_value(message).replace("\r\n", "\n").replace("\r", "\n")
+        text = text.rstrip("\n") + u"\n"
+        self.lines.append(text)
+        if self.error is None:
+            try:
+                self.stream.write(text.replace("\n", "\r\n"))
+                self.stream.flush()
+            except Exception as error:
+                self.error = text_value(error)
+                self.say("SMARTSKIN_P08A_FILE_ERROR | partial TXT; choose another path at the end")
+
+    def emit(self, kind, **data):
+        text = u"SMARTSKIN_P08A_" + text_value(kind) + u" | " + u" | ".join(
+            text_value(key) + u"=" + clean(data[key]) for key in sorted(data))
+        self.write(text)
+        if kind in ("IDENTITY", "INPUT", "MATCH_START", "COMPLETE", "STOP", "SAFETY"):
+            # Do not copy long diagnostics back into Rhino's bounded command history.
+            progress = u"SMARTSKIN_P08A_" + text_value(kind)
+            if kind == "MATCH_START":
+                progress += u" | " + clean(data.get("label"))
+            self.say(progress + u" | details in TXT")
+        return text
+
+    def close(self):
+        if self.closed:
+            return
+        try:
+            self.stream.close()
+        except Exception as error:
+            if self.error is None:
+                self.error = text_value(error)
+        finally:
+            self.closed = True
+
+
+def choose_report(console):
+    """Ask BEFORE binding/selection; a rejected path never starts the audit."""
+    import rhinoscriptsyntax as rs
+    name = "SmartSkin_ContextAudit_" + time.strftime("%Y%m%d_%H%M%S") + ".txt"
+    while True:
+        path = rs.SaveFileName(
+            u"Smart Skin — сохранить отчёт аудита", "Text files (*.txt)|*.txt||",
+            None, name, "txt")
+        if not path:
+            return None
+        path = txt_path(path)
+        if os.path.exists(path):
+            # Also covers extension normalization, not just the native dialog's name.
+            answer = rs.MessageBox(
+                u"Этот TXT уже существует. Заменить его?\n\n" + path,
+                4 | 32 | 256, u"Smart Skin — подтверждение перезаписи")
+            if answer != 6:
+                continue
+        try:
+            return TextReport(path, console)
+        except Exception as error:
+            rs.MessageBox(
+                u"Не удалось открыть TXT для записи. Выберите другой путь.\n\n"
+                + path + u"\n\n" + text_value(error),
+                0 | 16, u"Smart Skin — ошибка сохранения")
 
 
 class AuditStop(Exception):
@@ -50,13 +161,14 @@ class AuditStop(Exception):
 
 
 class ContextAudit(object):
-    def __init__(self):
+    def __init__(self, report):
         import clr
         import System
         import Rhino
         import scriptcontext
         self.clr, self.S, self.R, self.sc = clr, System, Rhino, scriptcontext
         self.doc = Rhino.RhinoDoc.ActiveDoc
+        self.report = report
         self.start = time.time()
         self.samples = 0
         self.owned = []
@@ -71,12 +183,11 @@ class ContextAudit(object):
         self.bind()
 
     def emit(self, kind, **data):
-        text = "SMARTSKIN_P08A_" + kind + " | " + " | ".join(
-            key + "=" + clean(data[key]) for key in sorted(data))
-        self.R.RhinoApp.WriteLine(text)
-        self.output.append(text)
+        self.output.append(self.report.emit(kind, **data))
 
     def checkpoint(self):
+        if self.report.error is not None:
+            raise AuditStop("TXT_WRITE_FAILED; partial log retained; choose a new report path")
         if self.sc.escape_test(False):
             raise AuditStop("CANCELLED")
         if time.time() - self.start > MAX_SECONDS:
@@ -150,7 +261,7 @@ class ContextAudit(object):
         self.emit("IDENTITY", audit=AUDIT_ID, version=EXPECTED_VERSION, commit=EXPECTED_COMMIT,
                   rhino=self.R.RhinoApp.Version, abs_tol=self.tol,
                   angle_deg=math.degrees(self.angle), unit=self.doc.ModelUnitSystem,
-                  mode="READ_ONLY;no_accept;no_document_write;no_file_write")
+                  mode="GEOMETRY_READ_ONLY;no_accept;no_document_write;selected_TXT_only")
 
     def active_count(self):
         return int(self.invoke(self.count_method, self.doc)[0])
@@ -482,20 +593,71 @@ class ContextAudit(object):
                 self.go.Dispose()
 
 
-def main():
+def run_to_report(report, audit_factory=ContextAudit):
+    """Keep STOP/traceback and SAFETY in the same report, including early failures."""
     audit = None
+    state = "STOPPED"
+    report.emit("REPORT_BEGIN", audit=AUDIT_ID, expected_version=EXPECTED_VERSION,
+                expected_commit=EXPECTED_COMMIT, path=report.path,
+                encoding="UTF-8-BOM", flush="EACH_RECORD",
+                local_time=time.strftime("%Y-%m-%dT%H:%M:%S"))
     try:
-        audit = ContextAudit()
+        audit = audit_factory(report)
         audit.run()
-    except Exception as error:
-        import Rhino
-        import traceback
-        Rhino.RhinoApp.WriteLine("SMARTSKIN_P08A_STOP | " + clean(error))
+        state = "COMPLETE"
+    except BaseException as error:
+        report.emit("STOP", error=error, exception_type=type(error).__name__)
         if not isinstance(error, AuditStop):
-            Rhino.RhinoApp.WriteLine(traceback.format_exc())
+            report.write("SMARTSKIN_P08A_TRACEBACK\n" + traceback.format_exc())
     finally:
-        if audit is not None:
-            audit.close()
+        try:
+            if audit is not None:
+                audit.close()
+                if audit.before is None:
+                    report.emit("SAFETY", state="NO_SELECTION_SNAPSHOT;geometry_audit_not_started",
+                                added_by_audit=0)
+            else:
+                report.emit("SAFETY", state="INITIALIZATION_STOPPED;geometry_audit_not_started",
+                            added_by_audit=0)
+        except BaseException as error:
+            state = "STOPPED"
+            report.emit("SAFETY", state="CHECK_FAILED;do_not_infer_geometry_unchanged", error=error)
+            report.write("SMARTSKIN_P08A_CLEANUP_TRACEBACK\n" + traceback.format_exc())
+        finally:
+            report.emit("REPORT_END", audit=AUDIT_ID, state=state,
+                        geometry_acceptance="NEVER", file_write_error=report.error)
+            report.close()
+
+
+def finish_report(report):
+    """Offer another explicit destination on I/O failure, without repeating geometry."""
+    current = report
+    while current.error is not None:
+        current.say("SMARTSKIN_P08A_FILE_INCOMPLETE | " + current.path)
+        replacement = choose_report(current.console)
+        if replacement is None:
+            current.say("SMARTSKIN_P08A_FILE_INCOMPLETE | save retry cancelled; prior TXT may be partial")
+            return
+        for line in current.lines:
+            replacement.write(line)
+        replacement.emit("REPORT_RECOVERED", previous_path=current.path,
+                         previous_io_error=current.error, new_path=replacement.path,
+                         geometry_rerun=False)
+        replacement.close()
+        current = replacement
+    current.say("SMARTSKIN_P08A_SAVED | " + current.path)
+
+
+def main():
+    import Rhino
+    console = Rhino.RhinoApp.WriteLine
+    report = choose_report(console)
+    if report is None:
+        console("SMARTSKIN_P08A_CANCELLED | no TXT path selected; audit not started")
+        return
+    report.say("SMARTSKIN_P08A_LOGGING | " + report.path)
+    run_to_report(report)
+    finish_report(report)
 
 
 if __name__ == "__main__":
