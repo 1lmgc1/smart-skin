@@ -1,0 +1,63 @@
+name: corner-repair-p08c4
+on:
+  push:
+    branches: [p08-corner-repair]
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  OPENBLAS_NUM_THREADS: 1
+  OMP_NUM_THREADS: 1
+  PYTHONPATH: experiments/P08C.CornerRepair:experiments/P08C.GeometricFairing:experiments/P08C.UVFairing
+jobs:
+  test-and-api-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preserve released product and previous constructors
+        run: git diff --exit-code 9f0d5eedd0d67c329c68d32c00c88a98504dda8a HEAD -- src tests Directory.Build.props VERSION scripts/Install-SmartSkin.ps1 scripts/Uninstall-SmartSkin.ps1 scripts/Package-Artifact.ps1 experiments/P08B.Construction experiments/P08C.AxisGuidance experiments/P08C.UVFairing experiments/P08C.GeometricFairing .github/workflows/build.yml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install numerical dependencies and require grammar checker
+        run: |
+          python -m pip install numpy==2.2.6 scipy==1.15.3 rhino3dm==8.17.0
+          python -c 'import lib2to3.refactor'
+      - name: Previous numerical regressions
+        run: |
+          set -o pipefail
+          mkdir -p corner-artifact
+          python -m unittest discover -s experiments/P08C.UVFairing -p 'test_*.py' -v 2>&1 | tee corner-artifact/uv-tests.txt
+          python -m unittest discover -s experiments/P08C.GeometricFairing -p 'test_*.py' -v 2>&1 | tee corner-artifact/geometric-tests.txt
+      - name: New numerical, OpenNURBS, file I/O and helper grammar tests
+        run: |
+          set -o pipefail
+          python -m py_compile experiments/P08C.CornerRepair/*.py scripts/field/SmartSkin_P08C4_JoinCheck.py
+          python -m unittest discover -s experiments/P08C.CornerRepair -p 'test_*.py' -v 2>&1 | tee corner-artifact/corner-tests.txt
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Compile field-check API contract, not Rhino execution
+        run: |
+          set -o pipefail
+          dotnet build experiments/P08C.CornerRepair/ApiCheck/ApiCheck.csproj -c Release 2>&1 | tee corner-artifact/api-compile.txt
+      - name: Package source and actual verification boundary
+        run: |
+          cp experiments/P08C.CornerRepair/*.py scripts/field/SmartSkin_P08C4_JoinCheck.py docs/P08C4_CORNER_REPAIR.md corner-artifact/
+          python - <<'PY'
+          import pathlib,hashlib,json,os
+          root=pathlib.Path('corner-artifact')
+          scope=dict(patch='P08C.4',commit=os.environ['GITHUB_SHA'],native_Rhino_Join='NOT_RUN',private_model='NOT_SENT_TO_CI',geometry_commit=False,RHP_updated=False,
+            verified='synthetic numeric, OpenNURBS, real file I/O, helper grammar, API compilation')
+          scope['sha256']={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob('*.py')}
+          (root/'verification-scope.json').write_text(json.dumps(scope,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SmartSkin-P08C4-${{ github.run_number }}-${{ github.sha }}
+          path: corner-artifact/*
+          if-no-files-found: error
+          retention-days: 30
