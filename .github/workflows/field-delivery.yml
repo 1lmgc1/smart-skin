@@ -21,20 +21,20 @@ jobs:
       - name: Preserve solver and production sources
         shell: pwsh
         run: |
-          git diff --exit-code 6f89eed8df9bbc7d3eae51d08a17885155bc5de5 HEAD -- src tests scripts experiments Directory.Build.props VERSION
+          git diff --exit-code 0a70e956df86639362b524808e316b8affeefe5b HEAD -- src tests scripts experiments Directory.Build.props VERSION
           if ($LASTEXITCODE -ne 0) { throw 'Production/solver drift' }
           New-Item -ItemType Directory -Path field-artifact -Force | Out-Null
-      - name: Python helper tests
+      - name: Python helper and guarded lifecycle tests
         shell: pwsh
         run: |
-          python -m unittest discover -s delivery/field01 -p test_field.py -v 2>&1 | Tee-Object field-artifact/python-tests.txt
+          python -m unittest discover -s delivery/field01 -p 'test_*.py' -v 2>&1 | Tee-Object field-artifact/python-tests.txt
           if ($LASTEXITCODE -ne 0) { throw 'Python tests failed' }
-      - name: Windows PowerShell 5.1 installer tests
+      - name: Windows PowerShell 5.1 installer and collector tests
         shell: pwsh
         run: |
           & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File delivery/field01/test_install.ps1 2>&1 | Tee-Object field-artifact/installer-51.txt
           if ($LASTEXITCODE -ne 0) { throw 'Installer 5.1 tests failed' }
-      - name: PowerShell 7 installer tests
+      - name: PowerShell 7 installer and collector tests
         shell: pwsh
         run: |
           & pwsh -NoProfile -File delivery/field01/test_install.ps1 2>&1 | Tee-Object field-artifact/installer-7.txt
@@ -44,19 +44,19 @@ jobs:
         run: |
           dotnet build delivery/field01/api/Api.csproj -c Release 2>&1 | Tee-Object field-artifact/api-build.txt
           if ($LASTEXITCODE -ne 0) { throw 'API compile failed' }
-          dotnet run --no-build -c Release --project delivery/field01/api/Api.csproj -- delivery/field01/field_core.py delivery/field01/field_runtime.py delivery/field01/native_check.py 2>&1 | Tee-Object field-artifact/ironpython-syntax.txt
+          dotnet run --no-build -c Release --project delivery/field01/api/Api.csproj -- delivery/field01/field_core.py delivery/field01/field_runtime.py delivery/field01/native_check.py delivery/field01/field_lifecycle.py 2>&1 | Tee-Object field-artifact/ironpython-syntax.txt
           if ($LASTEXITCODE -ne 0) { throw 'IronPython syntax failed' }
       - name: Archive exact source and scope
         shell: pwsh
         run: |
-          Copy-Item delivery/field01/*.py,delivery/field01/*.ps1,delivery/field01/*.cmd,docs/P08D1B_FIELD01.md field-artifact
+          Copy-Item delivery/field01/*.py,delivery/field01/*.ps1,delivery/field01/*.cmd,docs/P08D1B_FIELD01F1.md field-artifact
           $hashes=@{}
           Get-ChildItem field-artifact -File | ForEach-Object { $hashes[$_.Name]=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
-          @{commit=$env:GITHUB_SHA;package='P08D1B-FIELD01';native_Rhino_Join='NOT_RUN';Rhino_UI='NOT_RUN';private_model='NOT_SENT_TO_CI';RHP_updated=$false;sha256=$hashes}|ConvertTo-Json -Depth 5|Set-Content field-artifact/verification-scope.json -Encoding utf8
+          @{commit=$env:GITHUB_SHA;package='P08D1B-FIELD01F1';native_Rhino_Join='NOT_RUN';Rhino_UI='NOT_RUN';native_crash_cause='NOT_VERIFIED';private_model='NOT_SENT_TO_CI';RHP_updated=$false;sha256=$hashes}|ConvertTo-Json -Depth 5|Set-Content field-artifact/verification-scope.json -Encoding utf8
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: SmartSkin-Field01-${{ github.sha }}
+          name: SmartSkin-Field01F1-${{ github.sha }}
           path: field-artifact/*
           if-no-files-found: error
           retention-days: 30

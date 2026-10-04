@@ -1,8 +1,8 @@
 [CmdletBinding()]
-param([switch]$NoLaunch)
+param([switch]$NoLaunch,[switch]$Launch)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
-$Package = 'P08D1B-FIELD01'
+$Package = 'P08D1B-FIELD01F1'
 function Test-Payload([string]$Base) {
     $manifestPath = Join-Path $Base 'SHA256.json'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'SHA256.json missing. Extract the entire ZIP first.' }
@@ -88,7 +88,8 @@ try {
     Write-Host ('INSTALLED: '+$Package)
     Write-Host ('Shortcut: '+$link)
     Write-Host 'Production P07F2 is unchanged. No .NET or Python installation is needed.'
-    if (-not $NoLaunch) { & (Join-Path $release 'launch.ps1') }
+    Write-Host 'Rhino was NOT started. Launch explicitly with the Smart Skin Field desktop shortcut.'
+    if ($Launch -and -not $NoLaunch) { & (Join-Path $release 'launch.ps1') }
 } catch {
     Write-Host ('INSTALL STOP: '+$_.Exception.Message) -ForegroundColor Red
     exit 1

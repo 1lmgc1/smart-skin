@@ -1,21 +1,24 @@
 # -*- coding: utf-8 -*-
-"""P08D1B-FIELD01: native checks on copies, never CAD acceptance."""
+"""P08D1B-FIELD01F1: native checks on copies, never CAD acceptance."""
 from __future__ import print_function
 import time, traceback, math
 from field_core import Report, text, PACKAGE
 
-def check_case(doc, manifest, case, report_folder, snapshots, cancelled=lambda: False):
+def check_case(doc, manifest, case, report_folder, snapshots, cancelled=lambda: False, document_available=lambda: True):
     import Rhino as R
     import System
     import scriptcontext as sc
     report = Report(report_folder, R.RhinoApp.WriteLine)
     owned=[]; start=time.time(); state='STOPPED'; joined_ok=False
-    initial_count=None
+    initial_count=None; document_serial=doc.RuntimeSerialNumber
+    def document_alive():
+        return document_available() and R.RhinoDoc.FromRuntimeSerialNumber(document_serial) is not None
     def own(g):
         if g is not None: owned.append(g)
         return g
     def checkpoint():
         R.RhinoApp.Wait()
+        if not document_alive(): raise ValueError('FIELD_DOCUMENT_CLOSED')
         if cancelled() or sc.escape_test(False): raise ValueError('CANCELLED')
         if time.time()-start>120: raise ValueError('CHECK_TIME_BUDGET_120_SECONDS')
     def count():
@@ -220,11 +223,14 @@ def check_case(doc, manifest, case, report_folder, snapshots, cancelled=lambda: 
                     form_acceptance=False,geometry_commit=False)
     finally:
         try:
-            equal=True
-            for oid,snapshot in snapshots.items():
-                obj=doc.Objects.FindId(System.Guid(oid))
-                equal=equal and obj is not None and R.Geometry.GeometryBase.GeometryEquals(obj.Geometry,snapshot)
-            report.emit('SAFETY',all_fixture_geometry_equal=equal,objects_before=initial_count,objects_after=count(),
+            equal='NOT_VERIFIED_DOCUMENT_CLOSED'; after='NOT_MEASURED_DOCUMENT_CLOSED'
+            if document_alive():
+                equal=True
+                for oid,snapshot in snapshots.items():
+                    obj=doc.Objects.FindId(System.Guid(oid))
+                    equal=equal and obj is not None and R.Geometry.GeometryBase.GeometryEquals(obj.Geometry,snapshot)
+                after=count()
+            report.emit('SAFETY',all_fixture_geometry_equal=equal,objects_before=initial_count,objects_after=after,
                         added=0,deleted=0,replaced=0,display_layer_changes_only=True)
             report.emit('END',state=state,geometry_commit=False)
         finally:

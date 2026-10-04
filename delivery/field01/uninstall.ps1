@@ -5,7 +5,7 @@ try {
     $pointer=Join-Path $root 'current.json'
     if (-not (Test-Path -LiteralPath $pointer)) { Write-Host 'Smart Skin Field is not installed.'; exit 0 }
     $state=Get-Content -LiteralPath $pointer -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($state.package -ne 'P08D1B-FIELD01') { throw 'Another field version is active. It was not removed.' }
+    if ($state.package -ne 'P08D1B-FIELD01F1') { throw 'Another field version is active. It was not removed.' }
     $release=[IO.Path]::GetFullPath([string]$state.release)
     $allowed=[IO.Path]::GetFullPath((Join-Path $root 'releases'))+'\'
     if (-not $release.StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath (Join-Path $release '.smartskin-field-owned'))) { throw 'Unmanaged path; uninstall stopped.' }

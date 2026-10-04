@@ -26,6 +26,11 @@ class Program {
    var shape=face.CurvatureAt(.5,.5);var direction=shape.Direction(0);double k=shape.Kappa(0);
    var layer=doc.Layers[0];bool deleted=layer.IsDeleted;layer.IsVisible=true;doc.Layers.Modify(layer,layer.Index,true);
    doc.Objects.UnselectAll();doc.Views.ActiveView.ActiveViewport.ZoomBoundingBox(g.GetBoundingBox(true));
+   var parent=Rhino.UI.RhinoEtoApp.MainWindowForDocument(doc);
+   var again=RhinoDoc.FromRuntimeSerialNumber(doc.RuntimeSerialNumber);
+   EventHandler idle=(s,e)=>{}; RhinoApp.Idle+=idle;RhinoApp.Idle-=idle;
+   EventHandler<DocumentEventArgs> closed=(s,e)=>{var n=e.Document.RuntimeSerialNumber;};
+   RhinoDoc.CloseDocument+=closed;RhinoDoc.CloseDocument-=closed;
    var serial=doc.RuntimeSerialNumber;var path=doc.Path;RhinoApp.Wait();file.Dispose();g.Dispose();
  }
 }

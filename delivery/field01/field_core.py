@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""P08D1B-FIELD01. Pure Python 2.7/3 helpers; not a geometry solver."""
+"""P08D1B-FIELD01F1. Pure Python 2.7/3 helpers; not a geometry solver."""
 from __future__ import print_function
 import os, json, math, hashlib, uuid, time
 try:
     TEXT = unicode
 except NameError:
     TEXT = str
-PACKAGE = 'P08D1B-FIELD01'
+PACKAGE = 'P08D1B-FIELD01F1'
 
 def text(value):
     if isinstance(value, TEXT): return value

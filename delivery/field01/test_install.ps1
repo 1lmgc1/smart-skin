@@ -12,7 +12,7 @@ try {
         $records+=@{path=$name;sha256=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()}
     }
     $mp=Join-Path $src 'SHA256.json'
-    $body=@{package='P08D1B-FIELD01';files=$records}|ConvertTo-Json -Depth 5
+    $body=@{package='P08D1B-FIELD01F1';files=$records}|ConvertTo-Json -Depth 5
     [IO.File]::WriteAllText($mp,$body)
     $null=Test-Payload $src;Assert $true 'Initial manifest'
     $release=Install-Payload $src $dst;Assert (Test-Path -LiteralPath (Join-Path $release '.smartskin-field-owned')) 'Owner marker'
@@ -23,12 +23,24 @@ try {
     [IO.File]::WriteAllText((Join-Path $src 'a.txt'),'corrupt')
     Expect-Error {Test-Payload $src};Expect-Error {Install-Payload $src $dst}
     Assert ((Get-FileHash $sentinel).Hash -eq $sentinelHash) 'Production sentinel untouched'
-    $bad=@{package='P08D1B-FIELD01';files=@(@{path='../escape';sha256='a'},@{path='b';sha256='a'},@{path='c';sha256='a'},@{path='d';sha256='a'})}|ConvertTo-Json -Depth 5
+    $bad=@{package='P08D1B-FIELD01F1';files=@(@{path='../escape';sha256='a'},@{path='b';sha256='a'},@{path='c';sha256='a'},@{path='d';sha256='a'})}|ConvertTo-Json -Depth 5
     [IO.File]::WriteAllText($mp,$bad);Expect-Error {Test-Payload $src}
     $tokens=$null;$errors=$null
-    foreach ($file in @('install.ps1','launch.ps1','uninstall.ps1')) {
+    foreach ($file in @('install.ps1','launch.ps1','uninstall.ps1','collect_reports.ps1')) {
         $null=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $file),[ref]$tokens,[ref]$errors)
         Assert (@($errors).Count -eq 0) ('Parse '+$file)
     }
+    $diagnosticInput=Join-Path $root 'reports';$null=New-Item -ItemType Directory -Path $diagnosticInput
+    [IO.File]::WriteAllText((Join-Path $diagnosticInput 'SmartSkin_Field_session.txt'),'only field log')
+    [IO.File]::WriteAllText((Join-Path $diagnosticInput 'private.3dm'),'must not be copied')
+    & (Join-Path $PSScriptRoot 'collect_reports.ps1') -ReportRoot $diagnosticInput -OutputRoot $root -SkipWindowsEvents | Out-Null
+    $zip=Get-ChildItem -LiteralPath $root -Filter 'SmartSkin_Field_Diagnostics_*.zip'
+    Assert (@($zip).Count -eq 1) 'One diagnostics ZIP'
+    $zf=[IO.Compression.ZipFile]::OpenRead($zip.FullName)
+    try {
+        $names=@($zf.Entries | ForEach-Object {$_.FullName.Replace('\','/')})
+        Assert ($names -contains 'field_reports/SmartSkin_Field_session.txt') 'Field text copied'
+        Assert (-not ($names -match '\.3dm$')) 'Geometry not collected'
+    } finally {$zf.Dispose()}
     Write-Output ('INSTALLER_TESTS_PASS='+$checks)
 } finally {if (Test-Path -LiteralPath $root) {Remove-Item -LiteralPath $root -Recurse -Force}}
