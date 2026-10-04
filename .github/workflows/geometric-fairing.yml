@@ -1,0 +1,61 @@
+name: geometric-fairing-p08c3
+
+on:
+  push:
+    branches: [p08-geometric-fairing]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  OPENBLAS_NUM_THREADS: 1
+  OMP_NUM_THREADS: 1
+  PYTHONPATH: experiments/P08C.GeometricFairing:experiments/P08C.UVFairing
+
+jobs:
+  numerical-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preserve released plugin and prior numerical constructors
+        run: git diff --exit-code 131d5639f3a25c23d2080a86b9c066b2ac6607cb HEAD -- src tests scripts Directory.Build.props VERSION experiments/P08B.Construction experiments/P08C.AxisGuidance experiments/P08C.UVFairing .github/workflows/build.yml .github/workflows/uv-basis.yml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install numerical and OpenNURBS dependencies
+        run: python -m pip install numpy==2.2.6 scipy==1.15.3 rhino3dm==8.17.0
+      - name: Prior basis and curvature regression suite
+        run: |
+          set -o pipefail
+          mkdir -p geometric-artifact
+          python -m unittest discover -s experiments/P08C.UVFairing -p 'test_*.py' -v 2>&1 | tee geometric-artifact/prior-tests.txt
+      - name: New direct geometric solve and OpenNURBS tests
+        run: |
+          set -o pipefail
+          python -m py_compile experiments/P08C.GeometricFairing/*.py
+          python -m unittest discover -s experiments/P08C.GeometricFairing -p 'test_*.py' -v 2>&1 | tee geometric-artifact/geometric-tests.txt
+      - name: Record source and exact verification boundary
+        run: |
+          cp experiments/P08C.GeometricFairing/*.py geometric-artifact/
+          cp experiments/P08C.UVFairing/uv_basis_fairing.py experiments/P08C.UVFairing/local_regularity.py geometric-artifact/
+          cp docs/P08C3_GEOMETRIC_FAIRING.md geometric-artifact/
+          python - <<'PY'
+          import os,pathlib,hashlib,json
+          root=pathlib.Path('geometric-artifact')
+          scope=dict(experiment='P08C.3',commit=os.environ['GITHUB_SHA'],
+            checks='synthetic numerical nonlinear optimization and OpenNURBS roundtrip',
+            Rhino_Join='NOT_RUN',Rhino_UI='NOT_RUN',private_model='NOT_SENT_TO_CI',
+            runtime='DEVELOPER_CPYTHON_3_11_NOT_IRONPYTHON',geometry_commit=False)
+          scope['sha256']={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob('*.py')}
+          (root/'verification-scope.json').write_text(json.dumps(scope,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SmartSkin-P08C3-${{ github.run_number }}-${{ github.sha }}
+          path: geometric-artifact/*
+          if-no-files-found: error
+          retention-days: 30
