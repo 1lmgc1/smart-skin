@@ -1,0 +1,25 @@
+name: field-delivery
+on:
+  push:
+    branches: [p08-field-delivery]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-build-dependency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download pinned public geometry dependency for private local export
+        run: |
+          mkdir -p build-dependency
+          python -m pip download --only-binary=:all: --no-deps rhino3dm==8.17.0 -d build-dependency
+          sha256sum build-dependency/* > build-dependency/SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: field-build-dependency-${{ github.sha }}
+          path: build-dependency/*
+          retention-days: 7
