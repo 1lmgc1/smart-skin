@@ -20,6 +20,6 @@ jobs:
       - name: Preserve production and D1B sources
         run: |
           git diff --exit-code 6f89eed8df9bbc7d3eae51d08a17885155bc5de5 HEAD -- src tests scripts Directory.Build.props VERSION experiments/P08D.GeometricAttachment experiments/P08D.StructuredTransition
-      - name: Run D2A tests
+      - name: Run D2 topology and Assist tests
         working-directory: experiments/P08D.TopologyAssist
-        run: python -m unittest -v test_topology_generalization.py
+        run: python -m unittest discover -v -p "test_*.py"
