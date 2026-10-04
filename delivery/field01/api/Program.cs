@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Rhino;
 using Rhino.Geometry;
 using Rhino.FileIO;
@@ -11,8 +12,8 @@ class Program {
  }
  // This method is compiled, never executed without Rhino. It checks exact API signatures.
  static void ApiContract(RhinoDoc doc, Brep edgeOwner, BrepFace face, BrepTrim trim, Curve a, Curve b, File3dm file) {
-   var id=file.Objects[0].Attributes.ObjectId;
-   var g=file.Objects[0].Geometry.Duplicate();
+   var id=file.Objects.First().Attributes.ObjectId;
+   var g=file.Objects.First().Geometry.Duplicate();
    bool eq=GeometryBase.GeometryEquals(g,doc.Objects.FindId(id).Geometry);
    double parameter; bool ok=trim.GetTrimParameter(.5,out parameter);
    var uv=trim.PointAt(parameter);var image=trim.Face.PointAt(uv.X,uv.Y);
