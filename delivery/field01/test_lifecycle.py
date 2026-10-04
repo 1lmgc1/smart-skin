@@ -53,7 +53,7 @@ class LifetimeTests(unittest.TestCase):
     def test_report_finish_failure_cannot_escape_idle(self):
         self.report.fail_finish=True;self.life.mark_closed();self.idle()
         self.assertTrue(self.life.finalized);self.assertEqual(self.clean,['clean'])
-        self.assertIn('FINALIZE_REPORT',pathlib.Path(self.life.emergency_path).read_text())
+        self.assertIn('FINALIZE_REPORT',pathlib.Path(self.life.emergency_path).read_text(encoding='utf8'))
     def test_cleanup_error_contained(self):
         def bad():raise ValueError('detach failed')
         self.life.cleanup=bad;self.life.mark_closed();self.idle();self.assertTrue(self.life.failed)
@@ -67,7 +67,7 @@ class LifetimeTests(unittest.TestCase):
             @guarded('TEST_EVENT')
             def event(self,*args):raise ValueError('callback failed')
         Callback().event(None,None);self.assertTrue(life.failed)
-        self.assertIn('TEST_EVENT',pathlib.Path(life.emergency_path).read_text())
+        self.assertIn('TEST_EVENT',pathlib.Path(life.emergency_path).read_text(encoding='utf8'))
     def test_guard_baseexception_contained(self):
         life=self.life
         class Callback:
@@ -106,7 +106,7 @@ class SourceLifecycleTests(unittest.TestCase):
         s=ast.unparse(self.method('on_closed'))
         for bad in ('Dispose','snapshots','finish','sticky','Redraw','Close()'):self.assertNotIn(bad,s)
     def test_old_window_not_closed_on_duplicate_launch(self):
-        self.assertNotIn('old.Close()', (ROOT/'field_runtime.py').read_text())
+        self.assertNotIn('old.Close()', (ROOT/'field_runtime.py').read_text(encoding='utf8'))
     def test_no_explicit_form_dispose(self):
         for n in ast.walk(self.tree):
             if isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and n.func.attr=='Dispose':
@@ -114,12 +114,12 @@ class SourceLifecycleTests(unittest.TestCase):
     def test_check_snapshots_released_in_finally(self):
         n=self.method('on_check');self.assertIn('release_snapshots(values)',ast.unparse(n));self.assertTrue(any(isinstance(x,ast.Try) and x.finalbody for x in ast.walk(n)))
     def test_document_owner_is_document_scoped(self):
-        self.assertIn('MainWindowForDocument(doc)',(ROOT/'field_runtime.py').read_text())
+        self.assertIn('MainWindowForDocument(doc)',(ROOT/'field_runtime.py').read_text(encoding='utf8'))
     def test_source_topology_checker_only_adds_document_guard(self):
-        s=(ROOT/'native_check.py').read_text()
+        s=(ROOT/'native_check.py').read_text(encoding='utf8')
         self.assertIn('FromRuntimeSerialNumber',s);self.assertIn('NOT_VERIFIED_DOCUMENT_CLOSED',s)
     def test_installer_does_not_autolaunch(self):
-        s=(ROOT/'install.ps1').read_text();self.assertIn('$Launch -and -not $NoLaunch',s)
-        cmd=(ROOT/'install.cmd').read_text();self.assertNotIn('-Launch',cmd)
+        s=(ROOT/'install.ps1').read_text(encoding='utf8');self.assertIn('$Launch -and -not $NoLaunch',s)
+        cmd=(ROOT/'install.cmd').read_text(encoding='utf8');self.assertNotIn('-Launch',cmd)
 
 if __name__=='__main__':unittest.main()
