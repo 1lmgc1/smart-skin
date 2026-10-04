@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><TargetFramework>net8.0</TargetFramework><OutputType>Exe</OutputType><ImplicitUsings>enable</ImplicitUsings><Nullable>disable</Nullable></PropertyGroup>
+ <ItemGroup><PackageReference Include="RhinoCommon" Version="8.21.25188.17001" /><PackageReference Include="IronPython" Version="2.7.12" /></ItemGroup>
+</Project>
