@@ -20,9 +20,13 @@ function Test-Payload([string]$Base) {
 }
 function Set-AtomicText([string]$Path,[string]$Value) {
     $tmp = $Path + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
+    $backup = $tmp + '.backup'
     try {
         [IO.File]::WriteAllText($tmp,$Value,(New-Object Text.UTF8Encoding($false)))
-        if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($tmp,$Path,$null) }
+        if (Test-Path -LiteralPath $Path) {
+            [IO.File]::Replace($tmp,$Path,$backup)
+            if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force }
+        }
         else { [IO.File]::Move($tmp,$Path) }
     } finally { if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force } }
 }
