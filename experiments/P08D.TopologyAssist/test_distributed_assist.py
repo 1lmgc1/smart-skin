@@ -43,8 +43,8 @@ class FieldPlanTests(unittest.TestCase):
 
     def test_retraction_is_parameter_not_net_blend(self):
         src=pathlib.Path(__file__).with_name('distributed_assist.py').read_text(encoding='utf8')
-        self.assertNotIn('control net',src.lower())
         self.assertNotIn('trial.control',src)
+        self.assertIn("IDENTITY+alpha*(np.asarray(plan.left)-IDENTITY)",src)
 
     def test_variable_field_preserves_geometric_attachment(self):
         n=101;v=np.linspace(0,1,n);rng=np.random.default_rng(12)
