@@ -21,7 +21,7 @@ class Program {
    ok=Curve.GetDistancesBetweenCurves(a,b,.001,out max,out ta,out tb,out min,out ma,out mb);
    var joins=Brep.JoinBreps(new[]{edgeOwner},.01,.01);
    var part=a.Trim(.1,.2); var chains=Curve.JoinCurves(new[]{a,b},.01);
-   var normal=face.NormalAt(.5,.5);normal.Unitize();normal=normal*-1.;double dot=normal*normal;
+   var normal=face.NormalAt(.5,.5);normal.Unitize();normal=normal*-1.0;double dot=normal*normal;
    var shape=face.CurvatureAt(.5,.5);var direction=shape.Direction(0);double k=shape.Kappa(0);
    var layer=doc.Layers[0];bool deleted=layer.IsDeleted;layer.IsVisible=true;doc.Layers.Modify(layer,layer.Index,true);
    doc.Objects.UnselectAll();doc.Views.ActiveView.ActiveViewport.ZoomBoundingBox(g.GetBoundingBox(true));
