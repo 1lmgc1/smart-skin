@@ -1,0 +1,54 @@
+name: uv-basis-p08c2
+
+on:
+  push:
+    branches: [p08-uv-basis]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preserve released plugin and prior constructors
+        run: git diff --exit-code 5aa26988f657efb4c40ee0e59a3e5167974d3ff4 HEAD -- src tests scripts Directory.Build.props VERSION experiments/P08B.Construction experiments/P08C.AxisGuidance .github/workflows/build.yml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install independent numerical and OpenNURBS dependencies
+        run: python -m pip install numpy==2.2.6 scipy==1.15.3 rhino3dm==8.17.0
+      - name: Syntax and actual numerical/native OpenNURBS tests
+        run: |
+          set -o pipefail
+          mkdir -p uv-artifact
+          python -m py_compile experiments/P08C.UVFairing/*.py
+          PYTHONPATH=experiments/P08C.UVFairing python -m unittest discover -s experiments/P08C.UVFairing -p 'test_*.py' -v 2>&1 | tee uv-artifact/tests.txt
+      - name: Record exact verification scope
+        run: |
+          cp experiments/P08C.UVFairing/*.py uv-artifact/
+          cp docs/P08C2_UV_BASIS.md uv-artifact/
+          python - <<'PY'
+          import os, pathlib, hashlib, json
+          root=pathlib.Path('uv-artifact')
+          scope=dict(experiment='P08C.2',commit=os.environ['GITHUB_SHA'],
+            checks='synthetic_numerical_and_OpenNURBS',private_model='NOT_SENT_TO_CI',
+            Rhino_UI_Join='NOT_RUN',IronPython='NOT_SUPPORTED_DEVELOPER_CP311_CODE',
+            acceptance='NO_FINISHED_CAP_CLAIM',geometry_commit=False)
+          scope['files_sha256']={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob('*.py')}
+          (root/'verification-scope.json').write_text(json.dumps(scope,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SmartSkin-P08C2-UV-${{ github.run_number }}-${{ github.sha }}
+          path: uv-artifact/*
+          if-no-files-found: error
+          retention-days: 30
