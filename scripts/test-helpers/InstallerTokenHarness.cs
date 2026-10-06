@@ -4,6 +4,7 @@
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
 
@@ -26,7 +27,7 @@ namespace SmartSkin.InstallerTests
         const uint CREATE_SUSPENDED = 4;
         const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
         const uint WAIT_TIMEOUT = 258;
-        const int TokenElevation = 20, TokenIntegrityLevel = 25;
+        const int TokenDefaultDacl = 6, TokenElevation = 20, TokenIntegrityLevel = 25;
 
         [StructLayout(LayoutKind.Sequential)] struct SID_AND_ATTRIBUTES { public IntPtr Sid; public uint Attributes; }
         [StructLayout(LayoutKind.Sequential)] struct TOKEN_GROUPS_HEADER { public uint Count; public SID_AND_ATTRIBUTES First; }
@@ -75,6 +76,53 @@ namespace SmartSkin.InstallerTests
 
         static void Check(bool success, string operation)
         { if (!success) throw new Win32Exception(Marshal.GetLastWin32Error(), operation); }
+
+        // A hosted runner's elevated default DACL can grant object access through
+        // Administrators only. Once that SID is deny-only, .NET cannot reopen its
+        // own anonymous pipes. Give the current SID access to newly created test
+        // objects by modifying ONLY the cloned token's default DACL. Existing ACEs
+        // stay intact; the real token, privileges, integrity and SID groups do not
+        // change. This is not a filesystem/registry ACL or machine-policy change.
+        static void AllowUserInClonedTokenDefaultDacl(IntPtr clonedToken)
+        {
+            int needed;
+            GetTokenInformation(clonedToken, TokenDefaultDacl, IntPtr.Zero, 0, out needed);
+            if (needed < IntPtr.Size) throw new InvalidOperationException("Cannot read cloned token default DACL size.");
+            IntPtr original = Marshal.AllocHGlobal(needed);
+            IntPtr aclBuffer = IntPtr.Zero, tokenInfo = IntPtr.Zero;
+            try
+            {
+                Check(GetTokenInformation(clonedToken, TokenDefaultDacl, original, needed, out needed), "Read cloned token default DACL");
+                IntPtr existingAcl = Marshal.ReadIntPtr(original);
+                RawAcl acl;
+                if (existingAcl == IntPtr.Zero) acl = new RawAcl(2, 1);
+                else
+                {
+                    int aclLength = (ushort)Marshal.ReadInt16(existingAcl, 2);
+                    byte[] existingBytes = new byte[aclLength];
+                    Marshal.Copy(existingAcl, existingBytes, 0, aclLength);
+                    acl = new RawAcl(existingBytes, 0);
+                }
+                using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
+                {
+                    acl.InsertAce(acl.Count, new CommonAce(AceFlags.None, AceQualifier.AccessAllowed,
+                        0x10000000 /* GENERIC_ALL */, identity.User, false, null));
+                }
+                byte[] bytes = new byte[acl.BinaryLength];
+                acl.GetBinaryForm(bytes, 0);
+                aclBuffer = Marshal.AllocHGlobal(bytes.Length);
+                Marshal.Copy(bytes, 0, aclBuffer, bytes.Length);
+                tokenInfo = Marshal.AllocHGlobal(IntPtr.Size);
+                Marshal.WriteIntPtr(tokenInfo, aclBuffer);
+                Check(SetTokenInformation(clonedToken, TokenDefaultDacl, tokenInfo, IntPtr.Size), "Set current-SID allow on cloned token default DACL");
+            }
+            finally
+            {
+                if (tokenInfo != IntPtr.Zero) Marshal.FreeHGlobal(tokenInfo);
+                if (aclBuffer != IntPtr.Zero) Marshal.FreeHGlobal(aclBuffer);
+                Marshal.FreeHGlobal(original);
+            }
+        }
 
         public static TokenFacts CurrentFacts()
         {
@@ -131,6 +179,7 @@ namespace SmartSkin.InstallerTests
                     Check(ConvertStringSidToSid("S-1-5-32-544", out adminSid), "Create Administrators SID");
                     SID_AND_ATTRIBUTES[] denyOnly = new SID_AND_ATTRIBUTES[] { new SID_AND_ATTRIBUTES { Sid = adminSid } };
                     Check(CreateRestrictedToken(current, DISABLE_MAX_PRIVILEGE, 1, denyOnly, 0, IntPtr.Zero, 0, IntPtr.Zero, out restricted), "Create same-user non-admin token");
+                    AllowUserInClonedTokenDefaultDacl(restricted);
                     Check(ConvertStringSidToSid("S-1-16-8192", out mediumSid), "Create medium integrity SID");
                     SID_AND_ATTRIBUTES label = new SID_AND_ATTRIBUTES { Sid = mediumSid, Attributes = 0x20 };
                     IntPtr buffer = Marshal.AllocHGlobal(Marshal.SizeOf(label));
