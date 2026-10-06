@@ -71,9 +71,20 @@ def main():
             raise RuntimeError("Run SmartSurfaceBuild in a Rhino document.")
         _verify_dependency_versions()
         # Version-owned aliases avoid another script's generic module names.
+        _load_local("native_boundary_evidence")
         _load_local("native_family")
         input_module = _load_local("native_input")
+        _load_local("fan_shared_jets")
+        _load_local("fan_rational_fields")
+        _load_local("fan_geometry")
+        _load_local("lower_corner_geometry")
+        _load_local("upper_corner_geometry")
+        _load_local("upper_corner_certificate")
+        _load_local("constrained_uv")
         kernel = _load_local("skin_kernel")
+        _load_local("repaired_validation")
+        _load_local("atlas_separation")
+        _load_local("native_owner_separation")
         preview = _load_local("preview")
         Rhino.RhinoApp.EscapeKeyPressed += on_escape
         try:

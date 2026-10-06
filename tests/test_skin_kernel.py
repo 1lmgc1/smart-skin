@@ -195,6 +195,16 @@ class ConstructionTests(unittest.TestCase):
         with self.assertRaises(sk.Cancelled):self.model.evaluate(1,cancelled=lambda:True)
         with self.assertRaises(sk.Cancelled):sk.build_model(fixture(),cancelled=lambda:True)
 
+    def test_fixed_production_baseline_retains_h1_only(self):
+        fixed=sk.SkinModel(fixture(),_fixed_h1=True)
+        a=self.model.evaluate(1,validate=False);b=fixed.evaluate(1,validate=False)
+        self.assertEqual(fixed.network['production_baseline_h'],1.)
+        for left,right in zip(a['surfaces'],b['surfaces']):
+            np.testing.assert_allclose(left['homogeneous_cp'],right['homogeneous_cp'],rtol=0,atol=2e-12)
+        for h in (.5,1.5):
+            with self.assertRaisesRegex(ValueError,'select a generated U/V handle'):fixed.evaluate(h,validate=False)
+        self.assertEqual(self.model.evaluate(.5,validate=False)['h'],.5)
+
     def test_invalid_factor(self):
         for h in (.4,1.6,float('nan')):
             with self.assertRaises(ValueError):self.model.evaluate(h)

@@ -7,6 +7,570 @@ All RhinoCommon/Eto calls execute synchronously on Rhino's command/UI thread.
 
 import math
 import time
+import json
+import hashlib
+from collections import namedtuple
+
+
+HANDLE_EDIT_SCHEMA = "smartskin.uv-handles.v1"
+ATTACHMENT_PROOF_SCHEMA = "smartskin.attachments.v2"
+EDIT_PROOF_SCHEMA = "smartskin.edit-proof.v2"
+SHARED_METRICS = ("position", "normal_angle_degrees", "shape_operator")
+MAX_PREVIEW_PATCHES = 128
+MAX_PREVIEW_GUIDES = 128
+COLD_BUILD_SECONDS = 180.0
+CACHED_BUILD_SECONDS = 60.0
+NATIVE_SCREEN_SECONDS = 15.0
+
+
+def _native_owner_api():
+    try:
+        import _smartskin_p08e1_native_owner_separation as module
+    except ModuleNotFoundError as error:
+        if error.name != "_smartskin_p08e1_native_owner_separation":
+            raise
+        import native_owner_separation as module
+    return module
+
+
+def _verify_atlas_separation(result, source_model, request):
+    try:
+        import _smartskin_p08e1_atlas_separation as module
+    except ModuleNotFoundError as error:
+        if error.name != "_smartskin_p08e1_atlas_separation":
+            raise
+        import atlas_separation as module
+    if module.verify_atlas_separation(result, source_model, request=request) is not True:
+        raise RuntimeError("A fresh complete projected-atlas separation screen is required.")
+
+
+_CONVERSION_ISSUER = object()
+_ConversionBinding = namedtuple("_ConversionBinding", "issuer context descriptor_digest breps guides fingerprints")
+
+
+def _conversion_descriptor_digest(result, limit):
+    encode = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    patches = result.get("patches", result.get("surfaces", []))
+    if "surfaces" in result and encode(patches) != encode(result["surfaces"]):
+        raise RuntimeError("Native conversion and validated surface descriptors disagree.")
+    raw = encode({"patches": patches, "guides": result.get("guides", []),
+                  "edit_request": result.get("edit_request")}).encode("utf-8")
+    if len(raw) > limit:
+        raise RuntimeError("The exact conversion descriptor snapshot exceeds its finite memory budget.")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _converted_fingerprints(breps, guides, context, cancelled):
+    if len(breps) > MAX_PREVIEW_PATCHES or len(guides) > MAX_PREVIEW_GUIDES:
+        raise RuntimeError("Native conversion fingerprint count exceeds its budget.")
+    budget = _native_owner_api()._Budget(context.limits, cancelled)
+    objects = tuple(breps) + tuple(guides)
+    memory = 0
+    for item in objects:
+        size = int(budget.call(item.MemoryEstimate))
+        if size < 0:
+            raise RuntimeError("A native geometry memory estimate is invalid.")
+        memory += size
+        if memory > context.limits.max_snapshot_bytes:
+            raise RuntimeError("Native conversion fingerprint memory exceeds its budget.")
+    return tuple(context.adapter.fingerprint(item, budget) for item in objects)
+
+
+def _issue_checked_conversion(result, breps, guides, context, cancelled=None):
+    """Only called after the production converter's exact coefficient readback."""
+    if (context is None or len(breps) != len(result.get("patches", result.get("surfaces", [])))
+            or len(guides) != len(result.get("guides", []))):
+        raise RuntimeError("Checked native conversion does not cover every current descriptor.")
+    hashes = _converted_fingerprints(breps, guides, context, cancelled)
+    return _ConversionBinding(_CONVERSION_ISSUER, context,
+                              _conversion_descriptor_digest(result, context.limits.max_snapshot_bytes),
+                              tuple(breps), tuple(guides), hashes)
+
+
+def _verify_checked_conversion(binding, result, breps, guides, context, cancelled=None):
+    if (type(binding) is not _ConversionBinding or binding.issuer is not _CONVERSION_ISSUER
+            or binding.context is not context or len(binding.breps) != len(breps)
+            or len(binding.guides) != len(guides)
+            or any(a is not b for a, b in zip(binding.breps, breps))
+            or any(a is not b for a, b in zip(binding.guides, guides))):
+        raise RuntimeError("A converter-issued binding for these exact native Breps and guides is required.")
+    if _conversion_descriptor_digest(result, context.limits.max_snapshot_bytes) != binding.descriptor_digest:
+        raise RuntimeError("The native conversion belongs to different surface, guide or request descriptors.")
+    if _converted_fingerprints(breps, guides, context, cancelled) != binding.fingerprints:
+        raise RuntimeError("Converted native Brep or guide geometry changed after exact readback.")
+
+
+class NativeScreenState:
+    """Own a native context and a non-serializable receipt outside the result.
+
+    Invalidating a request destroys this state's authority to reuse its old
+    receipt, even when later restoring numerically identical geometry/values.
+    """
+    def __init__(self, source_model, context=None):
+        self.source_model = source_model
+        self.context = context
+        self.receipt = None
+        self.conversion = None
+        self.generation = 0
+        self.closed = False
+
+    def invalidate(self):
+        self.generation += 1
+        self.receipt = None
+        self.conversion = None
+
+    def screen(self, breps, result, request=None, cancelled=None, guides=(), conversion=None):
+        self.invalidate()
+        generation = self.generation
+        if self.closed or self.context is None:
+            raise RuntimeError("A live captured-owner context is required before native screening.")
+
+        def stale():
+            return self.closed or self.generation != generation or (cancelled is not None and cancelled())
+
+        ready, reason = geometry_commit_acceptance(result)
+        if not ready:
+            raise RuntimeError("Numerical readiness blocked: " + reason)
+        ready, reason = attachment_acceptance(result, self.source_model)
+        if not ready:
+            raise RuntimeError("Attachment acceptance blocked: " + reason)
+        if stale():
+            raise RuntimeError("Native screening cancelled or superseded.")
+        _verify_atlas_separation(result, self.source_model, request)
+        ledger = result.get("native_contact_ledger")
+        if not isinstance(ledger, dict) or ledger.get("checked") is not True:
+            raise RuntimeError("A checked current native-contact ledger is required.")
+        _verify_checked_conversion(conversion, result, breps, guides, self.context, stale)
+        api = _native_owner_api()
+        receipt = api.screen_native_owners(breps, self.context, ledger, request=request, cancelled=stale)
+        if stale():
+            raise RuntimeError("Native screening cancelled or superseded.")
+        if api.verify_receipt(receipt, breps, self.context, ledger, request=request, cancelled=stale) is not True:
+            raise RuntimeError("The native owner-separation receipt could not be verified.")
+        _verify_atlas_separation(result, self.source_model, request)
+        _verify_checked_conversion(conversion, result, breps, guides, self.context, stale)
+        if stale():
+            raise RuntimeError("Native screening cancelled or superseded.")
+        self.receipt = receipt
+        self.conversion = conversion
+        return receipt
+
+    def verify(self, breps, result, request=None, cancelled=None, guides=()):
+        if self.closed or self.receipt is None or self.context is None:
+            raise RuntimeError("A fresh native owner-separation receipt is required; restored values must be screened again.")
+        generation = self.generation
+        def stale():
+            return self.closed or self.generation != generation or (cancelled is not None and cancelled())
+        try:
+            if stale():
+                raise RuntimeError("Native receipt verification cancelled or superseded.")
+            ready, reason = geometry_commit_acceptance(result)
+            if not ready:
+                raise RuntimeError("Numerical readiness blocked: " + reason)
+            ready, reason = attachment_acceptance(result, self.source_model)
+            if not ready:
+                raise RuntimeError("Attachment acceptance blocked: " + reason)
+            _verify_atlas_separation(result, self.source_model, request)
+            _verify_checked_conversion(self.conversion, result, breps, guides, self.context, stale)
+            if _native_owner_api().verify_receipt(self.receipt, breps, self.context,
+                    result.get("native_contact_ledger"), request=request, cancelled=stale) is not True:
+                raise RuntimeError("The native owner-separation receipt could not be verified.")
+            if stale():
+                raise RuntimeError("Native receipt verification cancelled or superseded.")
+            return True
+        except Exception:
+            self.invalidate()
+            raise
+
+    def close(self):
+        self.invalidate()
+        self.closed = True
+        if self.context is not None:
+            _safe_cleanup(self.context.dispose)
+            self.context = None
+
+
+def _shared_metric_values(values, description):
+    if not isinstance(values, dict) or set(values) != set(SHARED_METRICS):
+        raise ValueError("Complete shared G0/G1/G2 " + description + " are required.")
+    if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
+           for value in values.values()):
+        raise ValueError("Shared G0/G1/G2 " + description + " must be finite and nonnegative.")
+    return {key: float(values[key]) for key in SHARED_METRICS}
+
+
+def geometry_commit_acceptance(result):
+    """Authorize native conversion only; a separate receipt still gates commit."""
+    if not isinstance(result, dict) or any(result.get(key) is not True for key in
+            ("valid", "geometry_valid")) or result.get("fatal") is not False:
+        return False, "The evaluated geometry is invalid or fatal."
+    if (result.get("disposition") != "native_screen_pending"
+            or result.get("experimental_commit_allowed") is not False
+            or ("native_screen_pending" in result and result["native_screen_pending"] is not True)):
+        return False, "Only explicit native_screen_pending numerical readiness permits native conversion."
+    for key in ("commit_allowed", "can_commit"):
+        if key in result and result[key] is not True:
+            return False, "The evaluated result explicitly disallows commit."
+    if result.get("preview_only") is True or result.get("inspection_only") is True:
+        return False, "The evaluated result is explicitly inspection-only."
+    if "commit_disposition" in result and result["commit_disposition"] != "native_screen_pending":
+        return False, "The evaluated result has a conflicting commit disposition."
+    return True, "Numerical checks permit conversion; a fresh native separation receipt is still required."
+
+
+def approved_upper_source_corners(source_model):
+    """Derive the two allowed vertices from captured source-role provenance.
+
+    The capture constructor independently validates this native-boundary
+    evidence. A result-supplied allowlist is never consulted here. Parameters
+    are exact native endpoints, not a neighborhood or a normalized guess.
+    """
+    if not isinstance(source_model, dict):
+        raise ValueError("Captured native source-role bindings are required.")
+    evidence = source_model.get("source_boundaries", {})
+    if (not isinstance(evidence, dict) or evidence.get("schema") != "native-boundaries-v1"
+            or evidence.get("complete") is not True or evidence.get("status") != "validated"):
+        raise ValueError("Validated captured native source-role bindings are required.")
+    roles = evidence.get("roles", {})
+    if (set(roles) != {"side0", "side1", "upper", "lower"}
+            or len(roles["side0"]) != 1 or len(roles["side1"]) != 1
+            or not roles["upper"] or not roles["lower"]):
+        raise ValueError("The approved upper-corner role mapping is incomplete.")
+    tolerance = float(source_model.get("absolute_tolerance", 0.0))
+    if not math.isfinite(tolerance) or tolerance <= 0.0:
+        raise ValueError("Captured model tolerance is required for source-corner identity.")
+
+    def endpoint(record, traversal_end):
+        key = record.get("source_key")
+        if not isinstance(key, str) or not key:
+            raise ValueError("A captured source corner has no owner-edge identity.")
+        domain = tuple(float(value) for value in record.get("original_curve_domain", []))
+        traversal = tuple(float(value) for value in record.get("traversal_domain", []))
+        if (len(domain) != 2 or len(traversal) != 2 or not all(math.isfinite(value) for value in domain + traversal)
+                or not domain[0] < domain[1] or set(traversal) != set(domain)):
+            raise ValueError("A source corner must retain its exact original endpoint domain.")
+        parameter = traversal[traversal_end]
+        native_end = 0 if parameter == domain[0] else 1
+        matches = [item for item in record.get("reference_corners", [])
+                   if type(item.get("edge_end")) is int and item["edge_end"] == native_end
+                   and item.get("edge_parameter") == parameter]
+        if len(matches) != 1:
+            raise ValueError("A source corner lacks a unique captured native endpoint witness.")
+        point = tuple(float(value) for value in matches[0].get("point", []))
+        if len(point) != 3 or not all(math.isfinite(value) for value in point):
+            raise ValueError("A source corner lacks a finite captured endpoint location.")
+        return key, parameter, point
+
+    approved = {}
+    for side_role, upper_record, upper_end in (("side0", roles["upper"][0], 0),
+                                              ("side1", roles["upper"][-1], 1)):
+        upper_key, upper_parameter, upper_point = endpoint(upper_record, upper_end)
+        side_key, side_parameter, side_point = endpoint(roles[side_role][0], 0)
+        if upper_key == side_key or math.dist(upper_point, side_point) > tolerance:
+            raise ValueError("The approved upper and side roles do not meet at the captured source vertex.")
+        corner_id = "upper:" + side_role
+        approved[corner_id] = {"corner_id": corner_id, "role": "upper_source_corner", "side_role": side_role,
+                               "upper_source_key": upper_key, "upper_native_parameter": upper_parameter,
+                               "side_source_key": side_key, "side_native_parameter": side_parameter}
+    return approved
+
+
+def attachment_acceptance(result, source_model=None):
+    """The old experimental PARTIAL gate is insufficient for this prototype."""
+    proof = result.get("attachment_proof", {}) if isinstance(result, dict) else {}
+    if not isinstance(proof, dict):
+        return False, "Full finite-boundary attachment evidence is missing or malformed; inspection only."
+    if (proof.get("schema") != ATTACHMENT_PROOF_SCHEMA
+            or proof.get("checked") is not True
+            or proof.get("source_full_finite_boundary_pass") is not True
+            or proof.get("shared_full_finite_boundary_pass") is not True):
+        return False, "Full finite source and shared-boundary attachments are not verified; inspection only."
+    required_fields = {"schema", "checked", "source_full_finite_boundary_pass", "shared_full_finite_boundary_pass",
+                       "corner_policy", "excluded_intervals", "excluded_points"}
+    if set(proof) != required_fields:
+        return False, "Attachment proof must explicitly bind exceptions; result-side allowlists or generic exemptions are forbidden."
+    if proof.get("corner_policy") != "hard_upper_source_corners" or proof.get("excluded_intervals") != []:
+        return False, "Finite-width attachment exclusions are forbidden; only the two approved upper source-corner points may be exceptional."
+    try:
+        approved = approved_upper_source_corners(source_model)
+    except (ValueError, TypeError, KeyError, AttributeError) as error:
+        return False, str(error)
+    points = proof.get("excluded_points")
+    if not isinstance(points, list) or len(points) > 2:
+        return False, "Corner exceptions must be a bounded explicit list of approved source vertices."
+    seen = set()
+    for point in points:
+        if not isinstance(point, dict):
+            return False, "A corner exception lacks its captured native source identity."
+        if any(type(point.get(key)) not in (int, float) or not math.isfinite(point[key])
+               for key in ("upper_native_parameter", "side_native_parameter")):
+            return False, "A corner exception must name exact finite native endpoint parameters."
+        identifier = point.get("corner_id")
+        if not isinstance(identifier, str) or identifier in seen or identifier not in approved or point != approved[identifier]:
+            return False, "A corner exception is not exactly an approved upper source vertex; other endpoints and internal junctions are forbidden."
+        seen.add(identifier)
+    return True, "Full finite source and shared-boundary attachment checks passed for this result."
+
+
+def verify_edit_result(request, result):
+    """Recheck the exact request and invariant proof, including at commit."""
+    if (not isinstance(request, dict) or request.get("schema") != HANDLE_EDIT_SCHEMA
+            or set(request) != {"schema", "basis_id", "revision", "values"}
+            or not isinstance(request.get("basis_id"), str) or not request["basis_id"]
+            or type(request.get("revision")) is not int or request["revision"] < 0
+            or not isinstance(request.get("values"), dict) or not 1 <= len(request["values"]) <= 128):
+        raise ValueError("The per-handle edit request is missing or malformed.")
+    if (not isinstance(result, dict) or any(not isinstance(key, str) or not key
+            or type(value) not in (int, float) or not math.isfinite(value)
+            for key, value in request["values"].items())):
+        raise ValueError("The per-handle edit request must contain finite scalar handle values.")
+    try:
+        expected = json.dumps(request, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        actual = json.dumps(result.get("edit_request"), sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError):
+        raise ValueError("The per-handle result does not have an exact finite request echo.") from None
+    if actual != expected:
+        raise ValueError("The geometry result does not match the requested per-handle edit.")
+    proof = result.get("edit_proof", {})
+    if (not isinstance(proof, dict) or proof.get("schema") != EDIT_PROOF_SCHEMA
+            or any(proof.get(key) is not True for key in
+                   ("checked", "source_2jets_unchanged", "shared_2jets_compatible"))):
+        raise ValueError("Fixed-source preservation and post-edit shared two-jet compatibility was not verified for this edit.")
+    residuals = _shared_metric_values(proof.get("shared_residuals"), "residuals")
+    tolerances = _shared_metric_values(proof.get("shared_tolerances"), "tolerances")
+    if any(residuals[key] > tolerances[key] for key in SHARED_METRICS):
+        raise ValueError("An edited shared trace exceeds the required G0/G1/G2 compatibility tolerance.")
+    if proof.get("symmetry_checked") is not True or proof.get("symmetry_compatible") is not True:
+        raise ValueError("Fresh post-edit geometric symmetry was not verified.")
+    symmetry_residual, symmetry_tolerance = proof.get("symmetry_residual"), proof.get("symmetry_tolerance")
+    if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
+           for value in (symmetry_residual, symmetry_tolerance)):
+        raise ValueError("Geometric symmetry requires a finite residual and tolerance.")
+    if symmetry_residual > symmetry_tolerance:
+        raise ValueError("The edited geometry exceeds the required symmetry tolerance.")
+    try:
+        positions_request = json.dumps(result.get("handle_positions_request"), sort_keys=True,
+                                       separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError):
+        raise ValueError("Actual handle positions are not bound to a finite edit request.") from None
+    if positions_request != expected:
+        raise ValueError("Actual handle positions are missing or stale for this edit request.")
+    positions = result.get("handle_positions")
+    if not isinstance(positions, dict) or set(positions) != set(request["values"]):
+        raise ValueError("The evaluator must return actual positions for every handle in this request.")
+    for point in positions.values():
+        if (not isinstance(point, (list, tuple)) or len(point) != 3
+                or any(type(value) not in (int, float) or not math.isfinite(value) for value in point)):
+            raise ValueError("Evaluated handle positions must be finite three-dimensional points.")
+    return {key: tuple(float(value) for value in point) for key, point in positions.items()}
+
+
+class HandleEditToken(namedtuple("HandleEditTokenBase", "revision basis_id values")):
+    """Immutable values captured for one evaluation; payload is a fresh copy."""
+    __slots__ = ()
+
+    @property
+    def payload(self):
+        return {"schema": HANDLE_EDIT_SCHEMA, "basis_id": self.basis_id,
+                "revision": self.revision, "values": dict(self.values)}
+
+
+class HandleEditState:
+    """Selected-handle controller, never an alias for the old global factor.
+
+    A catalog is an engine capability declaration, not mathematical proof.
+    Every evaluated edit requires fixed original-source two-jets and compatible
+    post-edit shared traces. New shared traces may move; they are not frozen.
+    """
+
+    def __init__(self, catalog=None, evaluator_available=False):
+        self.enabled = False
+        self.reason = "Local U/V handle editing is unavailable: the kernel has no verified constrained edit basis."
+        self.basis_id = ""
+        self.handles = {}
+        self.values = {}
+        self.last_valid_values = None
+        self.last_valid_positions = None
+        self.current_request_revision = None
+        self.last_valid_revision = None
+        self.shared_tolerances = None
+        self.symmetry_tolerance = None
+        self.selected_guide = None
+        self.selected_handle = None
+        if not catalog or not catalog.get("enabled", False):
+            if catalog and catalog.get("reason"):
+                self.reason = str(catalog["reason"])
+            return
+        if (catalog.get("schema") != HANDLE_EDIT_SCHEMA or not evaluator_available
+                or catalog.get("preserves_attachment_order") != 2):
+            raise ValueError("The per-handle kernel capability is incomplete or unsupported.")
+        basis_id = catalog.get("basis_id")
+        if not isinstance(basis_id, str) or not basis_id or len(basis_id) > 128:
+            raise ValueError("A bounded stable handle-basis identity is required.")
+        handles = catalog.get("handles", [])
+        if not 1 <= len(handles) <= 128:
+            raise ValueError("The handle catalog must contain one to 128 generated handles.")
+        self.shared_tolerances = _shared_metric_values(catalog.get("shared_tolerances"), "catalog tolerances")
+        self.symmetry_tolerance = catalog.get("symmetry_tolerance")
+        if (type(self.symmetry_tolerance) not in (int, float) or not math.isfinite(self.symmetry_tolerance)
+                or self.symmetry_tolerance < 0):
+            raise ValueError("The prepared catalog must define a fixed finite geometric symmetry tolerance.")
+        for source in handles:
+            item = dict(source)
+            identifier, guide = item.get("id"), item.get("guide_id")
+            if (not isinstance(identifier, str) or not identifier or len(identifier) > 128
+                    or identifier in self.handles or not isinstance(guide, str) or not guide
+                    or len(guide) > 128 or item.get("varying_axis") not in ("u", "v")):
+                raise ValueError("Handle and guide identities must be unique, bounded, and explicit.")
+            for key in ("minimum", "maximum", "neutral"):
+                item[key] = float(item[key])
+                if not math.isfinite(item[key]):
+                    raise ValueError("Handle ranges must be finite.")
+            if not item["minimum"] <= item["neutral"] <= item["maximum"] or item["minimum"] == item["maximum"]:
+                raise ValueError("The neutral handle value must lie within a nonempty range.")
+            for key in ("anchor", "position", "direction"):
+                item[key] = tuple(float(value) for value in item[key])
+                if len(item[key]) != 3 or not all(math.isfinite(value) for value in item[key]):
+                    raise ValueError("Handle display geometry must have finite three-dimensional coordinates.")
+            if sum(value * value for value in item["direction"]) <= 1e-24:
+                raise ValueError("A handle must have a nonzero local movement direction.")
+            self.handles[identifier] = item
+            self.values[identifier] = item["neutral"]
+        for identifier, item in self.handles.items():
+            partner_id = item.get("mirror_handle_id")
+            if not isinstance(partner_id, str) or partner_id not in self.handles:
+                raise ValueError("Every handle must name its mirrored partner or itself on the symmetry axis.")
+            partner = self.handles[partner_id]
+            if partner.get("mirror_handle_id") != identifier:
+                raise ValueError("Mirrored handle links must be reciprocal.")
+            if any(item.get(key) != partner.get(key) for key in
+                   ("minimum", "maximum", "neutral", "units", "varying_axis")):
+                raise ValueError("Mirrored handle pairs must have matching ranges, units and parameter direction.")
+        self.basis_id = basis_id
+        self.enabled = True
+        self.reason = "Select a U/V handle. Its mirrored partner changes with it; other handle values are retained."
+
+    def select_guide(self, guide_id):
+        self.selected_guide = guide_id
+        matches = [key for key, item in self.handles.items() if item["guide_id"] == guide_id]
+        if self.selected_handle not in matches:
+            self.selected_handle = matches[0] if matches else None
+        return matches
+
+    def select_handle(self, identifier):
+        if identifier not in self.handles or self.handles[identifier]["guide_id"] != self.selected_guide:
+            raise ValueError("The handle does not belong to the selected U/V guide.")
+        self.selected_handle = identifier
+
+    def set_selected_value(self, value):
+        if not self.enabled or self.selected_handle is None:
+            raise ValueError(self.reason)
+        item = self.handles[self.selected_handle]
+        partner = self.handles[item["mirror_handle_id"]]
+        if item.get("locked_reason") or partner.get("locked_reason"):
+            raise ValueError(str(item.get("locked_reason") or partner["locked_reason"]))
+        value = float(value)
+        if not math.isfinite(value) or not item["minimum"] <= value <= item["maximum"]:
+            raise ValueError("The selected handle value is outside its supported range.")
+        next_values = dict(self.values)
+        next_values[self.selected_handle] = value
+        next_values[item["mirror_handle_id"]] = value
+        self.values = next_values
+        # Even a repeated value is a newer request. It must not inherit the
+        # displayed token's authorization while native Add events are running.
+        self.current_request_revision = None
+
+    def validate_values(self, values):
+        if set(values) != set(self.handles):
+            raise ValueError("The request must contain every catalog handle exactly once.")
+        for identifier, item in self.handles.items():
+            value = values[identifier]
+            if (type(value) not in (int, float) or not math.isfinite(value)
+                    or not item["minimum"] <= value <= item["maximum"]):
+                raise ValueError("A requested handle is outside its finite supported range.")
+            if value != values[item["mirror_handle_id"]]:
+                raise ValueError("Mirrored handle values must be equal; asymmetric editing is unavailable.")
+            if item.get("locked_reason") and value != item["neutral"]:
+                raise ValueError(str(item["locked_reason"]))
+
+    def snapshot(self, revision):
+        if not self.enabled:
+            raise ValueError(self.reason)
+        self.validate_values(self.values)
+        self.current_request_revision = int(revision)
+        return HandleEditToken(self.current_request_revision, self.basis_id, tuple(sorted(self.values.items())))
+
+    def verify_result(self, token, result):
+        if token.basis_id != self.basis_id:
+            raise ValueError("The edit request belongs to another prepared basis.")
+        self.validate_values(dict(token.values))
+        positions = verify_edit_result(token.payload, result)
+        if result["edit_proof"]["shared_tolerances"] != self.shared_tolerances:
+            raise ValueError("An edit result changed the prepared shared G0/G1/G2 tolerances.")
+        if result["edit_proof"]["symmetry_tolerance"] != self.symmetry_tolerance:
+            raise ValueError("An edit result changed the prepared geometric symmetry tolerance.")
+        return positions
+
+    def accept(self, token, result):
+        positions = self.verify_result(token, result)
+        if token.revision != self.current_request_revision or dict(token.values) != self.values:
+            raise ValueError("A newer handle request superseded this evaluated result.")
+        self.last_valid_values = dict(token.values)
+        self.last_valid_positions = positions
+        self.last_valid_revision = token.revision
+
+    def verify_displayed_result(self, token, result):
+        positions = self.verify_result(token, result)
+        if (positions != self.last_valid_positions or dict(token.values) != self.last_valid_values
+                or dict(token.values) != self.values or token.revision != self.current_request_revision):
+            raise ValueError("The handle positions no longer match the displayed accepted preview.")
+
+    def restore_last_valid(self):
+        if self.last_valid_values is None:
+            return False
+        self.values = dict(self.last_valid_values)
+        self.current_request_revision = self.last_valid_revision
+        return True
+
+    def display_handle(self):
+        if self.selected_handle is None or self.last_valid_positions is None:
+            return None
+        item = self.handles[self.selected_handle]
+        # Display the handle belonging to the visible accepted preview, not a
+        # newer slider request whose geometry is still being evaluated.
+        return item["anchor"], self.last_valid_positions[self.selected_handle]
+
+
+def group_uv_guides(descriptors):
+    """Group the existing exact pieces; U/V denotes the varying parameter."""
+    groups = {}
+    for index, item in enumerate(descriptors):
+        kind = item.get("kind")
+        if kind == "profile":
+            number = int(item["piece"])
+            identifier, axis, label = "profile:" + str(number), "v", "V profile " + str(number + 1)
+        elif kind in ("row_collar", "row_middle"):
+            number = int(item["row"])
+            identifier, axis, label = "row:" + str(number), "u", "U row " + str(number + 1)
+        elif item.get("guide_id") and item.get("varying_axis") in ("u", "v"):
+            identifier, axis = str(item["guide_id"]), item["varying_axis"]
+            label = str(item.get("label", identifier))
+        else:
+            continue
+        if identifier not in groups:
+            groups[identifier] = {"id": identifier, "varying_axis": axis, "label": label, "indices": []}
+        groups[identifier]["indices"].append(index)
+    return sorted(groups.values(), key=lambda item: (item["varying_axis"], item["id"]))
+
+
+def evaluate_preview_request(prepared, edits, revision, cancelled):
+    """A selected edit has its own API; failure cannot become a global edit."""
+    token = edits.snapshot(revision) if edits.enabled else None
+    if token is not None:
+        result = prepared.evaluate_edit(token.payload, cancelled=cancelled)
+        edits.verify_result(token, result)
+        return result, token
+    return prepared.evaluate(1.0, cancelled=cancelled), None
 
 
 class PreviewState:
@@ -54,6 +618,10 @@ class PreviewState:
             return True
         self.error = reason or "The current setting did not produce valid geometry."
         return False
+
+    def superseded(self, token):
+        """Abort obsolete numerical work at its next cooperative checkpoint."""
+        return self.closed or self.cancelled or token[0] != self.revision
 
     @property
     def can_accept(self):
@@ -109,9 +677,19 @@ def _control_point(rg, value):
     xyz = [float(value[index]) / w for index in range(3)]
     if not all(math.isfinite(component) for component in xyz):
         raise ValueError("Kernel rational control point is outside finite native range.")
-    # The four-scalar constructor is homogeneous. Use the Point3d overload
-    # explicitly because we have divided by W already.
-    return rg.ControlPoint(rg.Point3d(*xyz), w)
+    # Pass the original homogeneous binary64 coefficients directly. A
+    # divide-then-multiply Euclidean round trip can change one ULP and spoil
+    # exact collapsed-pole identities. RhinoCommon's four-double overload is
+    # homogeneous (available since Rhino5); xyz above is only a range check.
+    return rg.ControlPoint(float(value[0]), float(value[1]), float(value[2]), w)
+
+
+def _assert_native_control_point(control, expected):
+    # Current RhinoCommon exposes homogeneous X/Y/Z and Weight directly.
+    # Do not reconstruct them through the Euclidean Location property.
+    actual = (float(control.X), float(control.Y), float(control.Z), float(control.Weight))
+    if actual != tuple(float(x) for x in expected):
+        raise ValueError("Native NURBS conversion changed a homogeneous control coefficient.")
 
 
 def _dispose_all(items):
@@ -131,13 +709,24 @@ def _safe_cleanup(action):
         return False
 
 
-def make_native_geometry(output, rg, cancelled):
+def _apply_brep_orientation(brep, descriptor):
+    reversed_orientation = descriptor.get("orientation_reversed", False)
+    if type(reversed_orientation) is not bool:
+        raise ValueError("Surface orientation metadata must be an explicit Boolean.")
+    if reversed_orientation:
+        # Keep all U/V coordinates and source-role bindings unchanged.
+        brep.Flip()
+    if not brep.IsValid:
+        raise ValueError("The oriented native preview Brep is invalid.")
+
+
+def make_native_geometry(output, rg, cancelled, native_context):
     """Convert exact rational descriptors. Never fit sampled/polyline guides."""
     breps, guides = [], []
     try:
         patches = output.get("patches", output.get("surfaces", []))
         guide_specs = output.get("guides", [])
-        if not patches or len(patches) > 128 or len(guide_specs) > 128:
+        if not patches or len(patches) > MAX_PREVIEW_PATCHES or len(guide_specs) > MAX_PREVIEW_GUIDES:
             raise ValueError("Kernel output exceeded the bounded preview contract.")
         for patch in patches:
             if cancelled():
@@ -165,6 +754,7 @@ def make_native_geometry(output, rg, cancelled):
                     for j in range(nv):
                         if not surface.Points.SetControlPoint(i, j, _control_point(rg, cp[i][j])):
                             raise ValueError("Rhino rejected a surface control point.")
+                        _assert_native_control_point(surface.Points.GetControlPoint(i, j), cp[i][j])
                 if not surface.IsValid:
                     raise ValueError("Rhino native NURBS surface validation failed.")
                 brep = surface.ToBrep()
@@ -172,6 +762,11 @@ def make_native_geometry(output, rg, cancelled):
                     if brep is not None:
                         brep.Dispose()
                     raise ValueError("Rhino native preview Brep validation failed.")
+                try:
+                    _apply_brep_orientation(brep, patch)
+                except Exception:
+                    brep.Dispose()
+                    raise
                 breps.append(brep)
             finally:
                 surface.Dispose()
@@ -190,16 +785,18 @@ def make_native_geometry(output, rg, cancelled):
                 for i, knot in enumerate(knots):
                     curve.Knots[i] = knot
                 for i, point in enumerate(cp):
-                    control = _control_point(rg, point)
-                    if not curve.Points.SetPoint(i, control.Location, control.Weight):
+                    _control_point(rg, point)  # Shared finite/positive-weight validation.
+                    if not curve.Points.SetPoint(i, *[float(x) for x in point]):
                         raise ValueError("Rhino rejected a guide control point.")
+                    _assert_native_control_point(curve.Points[i], point)
                 if not curve.IsValid:
                     raise ValueError("Rhino native guide validation failed.")
                 guides.append(curve)
             except Exception:
                 curve.Dispose()
                 raise
-        return breps, guides
+        binding = _issue_checked_conversion(output, breps, guides, native_context, cancelled)
+        return breps, guides, binding
     except Exception:
         _dispose_all(breps + guides)
         raise
@@ -223,11 +820,68 @@ def _rollback_new_additions(doc, additions):
     return complete
 
 
-def commit_new_geometry(doc, capture, breps, guides, handle, rhino, system):
+def _bounded_commit_items(items, limit, label):
+    """Bound direct helper inputs too, and freeze them against Add callbacks."""
+    result = []
+    for item in items:
+        if len(result) >= limit:
+            raise RuntimeError("The direct commit exceeds its finite " + label + " count budget.")
+        result.append(item)
+    return tuple(result)
+
+
+def commit_new_geometry(doc, capture, breps, guides, handle, rhino, system,
+                        attachment_result=None, edit_request=None, edit_state=None, cancelled=None, native_screen=None):
     """One undo scope, rollback only IDs created here; originals are untouched."""
+    breps = _bounded_commit_items(breps, MAX_PREVIEW_PATCHES, "skin")
+    guides = _bounded_commit_items(guides, MAX_PREVIEW_GUIDES, "guide")
+    if cancelled is not None and not callable(cancelled):
+        raise ValueError("The commit cancellation callback must be callable.")
+
+    def require_not_cancelled():
+        if cancelled is not None and cancelled():
+            if isinstance(native_screen, NativeScreenState):
+                native_screen.invalidate()
+            raise RuntimeError("Commit cancelled; no result was accepted.")
+
+    def _require_evidence_unchecked():
+        ready, reason = attachment_acceptance(attachment_result, getattr(capture, "model", None))
+        if not ready:
+            raise RuntimeError("Attachment acceptance blocked: " + reason)
+        ready, reason = geometry_commit_acceptance(attachment_result)
+        if not ready:
+            raise RuntimeError("Geometry acceptance blocked: " + reason)
+        if edit_request is not None:
+            try:
+                verify_edit_result(edit_request, attachment_result)
+                if edit_state is None:
+                    raise ValueError("The prepared mirrored handle catalog and displayed positions are required at commit.")
+                token = HandleEditToken(edit_request["revision"], edit_request["basis_id"],
+                                        tuple(sorted(edit_request["values"].items())))
+                edit_state.verify_displayed_result(token, attachment_result)
+            except ValueError as error:
+                raise RuntimeError("Selected-handle acceptance blocked: " + str(error)) from None
+        elif attachment_result.get("edit_request") is not None:
+            raise RuntimeError("An edited result requires its exact selected-handle request at commit.")
+        if not isinstance(native_screen, NativeScreenState) or native_screen.source_model is not capture.model:
+            raise RuntimeError("A separately held native separation receipt for this captured input is required.")
+        native_screen.verify(breps, attachment_result, request=edit_request, cancelled=cancelled, guides=guides)
+
+    def require_evidence():
+        try:
+            _require_evidence_unchecked()
+        except Exception:
+            if isinstance(native_screen, NativeScreenState):
+                native_screen.invalidate()
+            raise
+
+    require_not_cancelled()
     ok, reason = capture.verify_sources(doc)
     if not ok:
+        if isinstance(native_screen, NativeScreenState):
+            native_screen.invalidate()
         raise RuntimeError("Sources changed during preview: " + reason)
+    require_evidence()
     if not breps:
         raise RuntimeError("There is no valid current preview to add.")
     if not doc.UndoRecordingEnabled:
@@ -241,13 +895,20 @@ def commit_new_geometry(doc, capture, breps, guides, handle, rhino, system):
     try:
         for kind, objects in (("skin", breps), ("guide", guides)):
             for index, geometry in enumerate(objects):
+                require_not_cancelled()
+                # This is mandatory even for a direct helper call. Recheck
+                # before every native Add operation; there is no legacy
+                # no-proof / experimental-partial transaction fallback.
+                require_evidence()
                 if not geometry.IsValid:
                     raise RuntimeError("A native result became invalid before commit.")
                 attributes = rhino.DocObjects.ObjectAttributes()
                 try:
                     attributes.Name = "Smart Skin {0} {1}".format(kind, index + 1)
-                    attributes.SetUserString("SmartSkin.Route", "FULLCYCLE_EXPERIMENTAL_PARTIAL")
+                    attributes.SetUserString("SmartSkin.Route", "FULLCYCLE_SELECTED_UV_PROTOTYPE")
                     attributes.SetUserString("SmartSkin.ShoulderHandleFactor", "{:.2f}".format(handle))
+                    if edit_request is not None:
+                        attributes.SetUserString("SmartSkin.SelectedHandleRequest", json.dumps(edit_request, sort_keys=True))
                     identifier = (doc.Objects.AddBrep(geometry, attributes) if kind == "skin"
                                   else doc.Objects.AddCurve(geometry, attributes))
                 finally:
@@ -255,6 +916,8 @@ def commit_new_geometry(doc, capture, breps, guides, handle, rhino, system):
                 if identifier == system.Guid.Empty:
                     raise RuntimeError("Rhino could not add every result; rolling back this attempt.")
                 additions.append(identifier)
+        require_not_cancelled()
+        require_evidence()
         ok, reason = capture.verify_sources(doc)
         if not ok:
             raise RuntimeError("Source proof changed at commit: " + reason)
@@ -264,6 +927,8 @@ def commit_new_geometry(doc, capture, breps, guides, handle, rhino, system):
                for identifier in additions):
             raise RuntimeError("The complete new result could not be verified.")
     except Exception as original:
+        if isinstance(native_screen, NativeScreenState):
+            native_screen.invalidate()
         rollback_ok = _rollback_new_additions(doc, additions)
         if not rollback_ok:
             raise RuntimeError("New-only rollback was incomplete. Use Undo once and inspect the result.") from original
@@ -276,6 +941,8 @@ def commit_new_geometry(doc, capture, breps, guides, handle, rhino, system):
                 except Exception:
                     ended = False
                 if not ended:
+                    if isinstance(native_screen, NativeScreenState):
+                        native_screen.invalidate()
                     restored = _rollback_new_additions(doc, additions)
                     raise RuntimeError("The single undo scope could not be closed. " +
                                        ("New additions were removed." if restored else
@@ -322,9 +989,14 @@ def _metric_text(output):
         for key, caption in (("minimum_sampled_sine", "Minimum sampled tangent sine"),
                              ("minimum_sampled_jacobian", "Minimum sampled Jacobian"),
                              ("minimum_orientation_dot_h1", "Minimum orientation dot versus handle 1.00"),
-                             ("sampled_max_curvature", "Maximum sampled curvature")):
+                             ("sampled_max_curvature", "Maximum ordinary-grid curvature")):
             if key in metrics:
                 lines.append(caption + ": " + _number(metrics[key]))
+        hard_corner = metrics.get("hard_corner_curvature", {})
+        if isinstance(hard_corner, dict) and hard_corner:
+            value = hard_corner.get("logarithmic_sampled_max_curvature")
+            lines.append("Approved hard-corner approach curvature: " + _number(value)
+                         + " (logarithmic samples; growth toward the point is allowed, not globally bounded).")
         if "corner_policy" in metrics:
             lines.append(str(metrics["corner_policy"])[:300])
         for key in ("failing_intervals", "finite_corner_failures"):
@@ -358,6 +1030,8 @@ def run(doc, capture, kernel):
             super().__init__()
             self.closed = False
             self.breps, self.guides = [], []
+            self.selected_guide_indices = set()
+            self.handle_display = None
             self.material = Rhino.Display.DisplayMaterial(system_drawing.Color.FromArgb(65, 195, 215))
             self.material.Transparency = 0.35
 
@@ -367,6 +1041,9 @@ def run(doc, capture, kernel):
             box = BoundingBox.Empty
             for item in self.breps + self.guides:
                 box.Union(item.GetBoundingBox(True))
+            if self.handle_display is not None:
+                for point in self.handle_display:
+                    box.Union(Rhino.Geometry.Point3d(*point))
             if box.IsValid:
                 event.IncludeBoundingBox(box)
 
@@ -376,8 +1053,14 @@ def run(doc, capture, kernel):
             for brep in self.breps:
                 event.Display.DrawBrepShaded(brep, self.material)
                 event.Display.DrawBrepWires(brep, system_drawing.Color.DarkCyan, 1)
-            for curve in self.guides:
-                event.Display.DrawCurve(curve, system_drawing.Color.Orange, 2)
+            for index, curve in enumerate(self.guides):
+                selected = index in self.selected_guide_indices
+                event.Display.DrawCurve(curve, system_drawing.Color.Yellow if selected else system_drawing.Color.Orange,
+                                        4 if selected else 2)
+            if self.handle_display is not None:
+                anchor, point = [Rhino.Geometry.Point3d(*value) for value in self.handle_display]
+                event.Display.DrawLine(anchor, point, system_drawing.Color.Yellow, 2)
+                event.Display.DrawPoint(point, Rhino.Display.PointStyle.Simple, 6, system_drawing.Color.Yellow)
 
         def replace(self, breps, guides):
             previous = self.breps + self.guides
@@ -396,6 +1079,13 @@ def run(doc, capture, kernel):
         def __init__(self):
             self.state = PreviewState()
             self.prepared = None
+            self.native_screen = NativeScreenState(capture.model)
+            self.edits = None
+            self.valid_edit_token = None
+            self.attachment_ready = False
+            self.attachment_reason = "Full finite source and shared-boundary attachments are not verified; inspection only."
+            self.guide_groups = []
+            self.handle_ids = []
             self.output = None
             self.accept_requested = False
             self.closing_for_command = False
@@ -406,57 +1096,84 @@ def run(doc, capture, kernel):
             self.conduit = Conduit()
             self.form = forms.Form()
             self.form.Title = "Smart Skin | native FULLCYCLE preview"
-            self.form.ClientSize = drawing.Size(570, 620)
+            self.form.ClientSize = drawing.Size(600, 740)
             self.form.Resizable = True
             self.form.Minimizable = False
             self.form.Maximizable = False
             self.form.ShowActivated = False
             self.form.Owner = Rhino.UI.RhinoEtoApp.MainWindowForDocument(doc)
+            self.guide_selector = forms.DropDown()
+            self.guide_selector.Enabled = False
+            self.guide_selector.Width = 410
+            self.handle_selector = forms.DropDown()
+            self.handle_selector.Enabled = False
+            self.handle_selector.Width = 410
             self.slider = forms.Slider()
-            self.slider.MinValue = 50
-            self.slider.MaxValue = 150
-            self.slider.Value = 100
-            self.slider.TickFrequency = 10
+            self.slider.MinValue = 0
+            self.slider.MaxValue = 1000
+            self.slider.Value = 500
+            self.slider.TickFrequency = 100
             self.slider.Width = 280
-            self.slider.ToolTip = "Scales both shoulder handles symmetrically. This is geometry, not a tolerance."
+            self.slider.Enabled = False
+            self.slider.ToolTip = "Changes the selected guide handle and its mirrored partner through the constrained edit basis."
             self.value = forms.Label()
-            self.value.Text = "1.00"
-            self.value.Width = 55
+            self.value.Text = "unavailable"
+            self.value.Width = 110
+            self.handle_note = forms.Label()
+            self.handle_note.Wrap = forms.WrapMode.Word
+            self.handle_note.Height = 60
+            self.handle_note.Text = "Checking whether a verified per-handle edit basis is available..."
             self.status = forms.TextArea()
             self.status.ReadOnly = True
             self.status.Wrap = True
             self.status.Height = 300
             self.status.Text = "Preparing native source-edge data..."
-            limitation = forms.Label()
-            limitation.Text = ("EXPERIMENTAL PARTIAL CONTINUITY\n"
-                               "Finite upper corners AND source-side end strips have G1/G2 failures. Numerical samples "
-                               "and valid Breps do not certify full-boundary G2 continuity.")
-            limitation.Wrap = forms.WrapMode.Word
+            self.limitation = forms.Label()
+            self.limitation.Text = ("EXPERIMENTAL FIELD CANDIDATE: PREPARING AND CHECKING\n"
+                               "Editing and acceptance are disabled until all required checks pass. "
+                               "Only the two approved upper source corners may remain hard with rising curvature; "
+                               "finite end-strip exemptions are forbidden.")
+            self.limitation.Wrap = forms.WrapMode.Word
             instruction = forms.Label()
-            instruction.Text = ("Enter / Space / right-click: accept the displayed experimental result.\n"
+            instruction.Text = ("Enter / Space / right-click: accept only when the required attachment checks pass.\n"
                                 "Esc or closing this window: discard preview. Sources stay unchanged.")
             instruction.Wrap = forms.WrapMode.Word
             layout = forms.DynamicLayout()
             layout.Padding = drawing.Padding(16)
             layout.Spacing = drawing.Size(8, 10)
             caption = forms.Label()
-            caption.Text = "Shoulder curvature / handle factor (both sides)"
+            caption.Text = "Select a U/V guide and its own handle"
             layout.AddRow(caption)
+            guide_label = forms.Label()
+            guide_label.Text = "Guide"
+            handle_label = forms.Label()
+            handle_label.Text = "Handle"
+            guide_row = forms.DynamicLayout()
+            guide_row.AddRow(guide_label, self.guide_selector)
+            handle_row = forms.DynamicLayout()
+            handle_row.AddRow(handle_label, self.handle_selector)
+            layout.AddRow(guide_row)
+            layout.AddRow(handle_row)
             row = forms.DynamicLayout()
             row.Spacing = drawing.Size(8, 0)
             row.AddRow(self.slider, self.value)
             layout.AddRow(row)
-            layout.AddRow(limitation)
+            layout.AddRow(self.handle_note)
+            layout.AddRow(self.limitation)
             layout.AddRow(self.status)
             layout.AddRow(instruction)
             self.form.Content = layout
             self.timer = forms.UITimer()
             self.timer.Interval = 0.25
             self.slider.ValueChanged += self.on_change
+            self.guide_selector.SelectedIndexChanged += self.on_guide_change
+            self.handle_selector.SelectedIndexChanged += self.on_handle_change
             self.timer.Elapsed += self.on_tick
             self.form.Closing += self.on_closing
             self.form.KeyDown += self.on_key
             self.slider.KeyDown += self.on_key
+            self.guide_selector.KeyDown += self.on_key
+            self.handle_selector.KeyDown += self.on_key
             self.status.KeyDown += self.on_key
             Rhino.RhinoApp.EscapeKeyPressed += self.on_escape
             self.conduit.Enabled = True
@@ -476,6 +1193,7 @@ def run(doc, capture, kernel):
         def on_escape(self, sender, event):
             if self.disposed or self.state.closed:
                 return
+            self.native_screen.invalidate()
             self.state.cancel()
             self.timer.Stop()
 
@@ -484,6 +1202,7 @@ def run(doc, capture, kernel):
                 return
             self.timer.Stop()
             if not self.closing_for_command:
+                self.native_screen.invalidate()
                 self.state.cancel()
 
         def on_key(self, sender, event):
@@ -500,12 +1219,91 @@ def run(doc, capture, kernel):
         def on_change(self, sender, event):
             if self.suppress_changes or self.disposed or self.state.cancelled or self.state.closed:
                 return
+            if self.edits is None or not self.edits.enabled or not self.slider.Enabled:
+                return
             self.accept_requested = False
-            self.state.request(self.slider.Value / 100.0)
-            self.value.Text = "{:.2f}".format(self.state.requested_h)
+            self.native_screen.invalidate()
+            item = self.edits.handles[self.edits.selected_handle]
+            value = item["minimum"] + (item["maximum"] - item["minimum"]) * self.slider.Value / 1000.0
+            self.edits.set_selected_value(value)
+            # Reuse the existing revision/cancellation machinery. The scalar
+            # remains the fixed baseline; it is NEVER the selected edit input.
+            self.state.request(1.0)
+            self.value.Text = _number(value)
             self.timer.Stop()
-            self.status.Text = "UPDATING: waiting for the new setting. Acceptance is disabled."
+            self.status.Text = "UPDATING: waiting for the selected handle edit. Acceptance is disabled."
             self.timer.Start()
+
+        def refresh_handle_controls(self):
+            previous_suppression = self.suppress_changes
+            self.suppress_changes = True
+            try:
+                self.handle_ids = ([] if self.edits is None else self.edits.select_guide(self.edits.selected_guide))
+                self.handle_selector.DataStore = [str(self.edits.handles[key].get("label", key)) for key in self.handle_ids]
+                self.handle_selector.Enabled = bool(self.handle_ids)
+                self.handle_selector.SelectedIndex = (self.handle_ids.index(self.edits.selected_handle) if self.handle_ids else -1)
+                item = self.edits.handles.get(self.edits.selected_handle) if self.edits is not None else None
+                partner = self.edits.handles[item["mirror_handle_id"]] if item is not None else None
+                locked_reason = (item.get("locked_reason") or partner.get("locked_reason")) if item is not None else None
+                self.slider.Enabled = bool(self.edits is not None and self.edits.enabled and self.attachment_ready
+                                           and self.native_screen.receipt is not None
+                                           and item and not locked_reason)
+                if item is not None:
+                    value = self.edits.values[self.edits.selected_handle]
+                    self.slider.Value = int(round(1000 * (value - item["minimum"]) / (item["maximum"] - item["minimum"])))
+                    self.value.Text = _number(value) + (" " + str(item["units"]) if item.get("units") else "")
+                    self.handle_note.Text = (self.attachment_reason if not self.attachment_ready
+                                             else str(locked_reason or self.edits.reason))
+                else:
+                    self.value.Text = "unavailable"
+                    self.handle_note.Text = (self.attachment_reason if not self.attachment_ready else
+                                             self.edits.reason if self.edits is not None and not self.edits.enabled else
+                                             "This guide has no editable handle in the constrained basis.")
+            finally:
+                self.suppress_changes = previous_suppression
+
+        def refresh_guide_choices(self, groups):
+            self.guide_groups = groups
+            previous_suppression = self.suppress_changes
+            self.suppress_changes = True
+            try:
+                self.guide_selector.DataStore = [item["label"] for item in groups]
+                self.guide_selector.Enabled = bool(groups)
+                identifiers = [item["id"] for item in groups]
+                current = self.edits.selected_guide
+                index = identifiers.index(current) if current in identifiers else (0 if groups else -1)
+                self.guide_selector.SelectedIndex = index
+                self.edits.select_guide(identifiers[index] if index >= 0 else None)
+                self.refresh_handle_controls()
+            finally:
+                self.suppress_changes = previous_suppression
+            self.update_selection_display()
+
+        def update_selection_display(self):
+            selected = self.edits.selected_guide if self.edits is not None else None
+            self.conduit.selected_guide_indices = next((set(item["indices"]) for item in self.guide_groups if item["id"] == selected), set())
+            self.conduit.handle_display = self.edits.display_handle() if self.edits is not None else None
+            doc.Views.Redraw()
+
+        def on_guide_change(self, sender, event):
+            if self.suppress_changes or self.disposed or self.state.closed or self.state.cancelled or self.edits is None:
+                return
+            index = self.guide_selector.SelectedIndex
+            if not 0 <= index < len(self.guide_groups):
+                return
+            self.edits.select_guide(self.guide_groups[index]["id"])
+            self.refresh_handle_controls()
+            self.update_selection_display()
+
+        def on_handle_change(self, sender, event):
+            if self.suppress_changes or self.disposed or self.state.closed or self.state.cancelled or self.edits is None:
+                return
+            index = self.handle_selector.SelectedIndex
+            if not 0 <= index < len(self.handle_ids):
+                return
+            self.edits.select_handle(self.handle_ids[index])
+            self.refresh_handle_controls()
+            self.update_selection_display()
 
         def on_tick(self, sender, event):
             if self.disposed or self.state.closed or self.state.cancelled:
@@ -518,53 +1316,145 @@ def run(doc, capture, kernel):
             if token is None:
                 return
             started = time.monotonic()
-            self.deadline = started + 60.0
+            budget_seconds = COLD_BUILD_SECONDS if self.prepared is None else CACHED_BUILD_SECONDS
+            self.deadline = started + budget_seconds
             self.timed_out = False
+            self.native_screen.invalidate()
             breps, guides = [], []
+            def evaluation_cancelled():
+                # The UI pump can receive a newer slider value. Do not spend
+                # another expensive fan rebuild finishing an obsolete value.
+                return self.cancelled() or self.state.superseded(token)
             try:
-                self.status.Text = "UPDATING: building native skin and exact NURBS guides..."
+                self.status.Text = ("PREPARING: {0:g}-second total budget.\n"
+                                    "Esc between supported operations; one native call cannot be force-interrupted.").format(budget_seconds)
                 if self.prepared is None:
                     # Input mapping contains only owned generic numerical data.
                     self.prepared = kernel.prepare(capture.model, cancelled=self.cancelled)
-                result = self.prepared.evaluate(token[1], cancelled=self.cancelled)
-                if (not result.get("valid", False) or result.get("fatal", False)
-                        or not result.get("experimental_commit_allowed", True)):
-                    raise ValueError(result.get("reason", "Numerical geometry/regularity checks failed."))
-                breps, guides = make_native_geometry(result, Rhino.Geometry, self.cancelled)
+                if self.edits is None:
+                    provider = getattr(self.prepared, "handle_edit_catalog", None)
+                    self.edits = HandleEditState(provider() if callable(provider) else None,
+                                                 callable(getattr(self.prepared, "evaluate_edit", None)))
+                    self.handle_note.Text = self.edits.reason
+                self.status.Text = "NUMERICAL CHECKS: evaluating current geometry, attachments and projected atlas..."
+                result, edit_token = evaluate_preview_request(self.prepared, self.edits, token[0], evaluation_cancelled)
+                ready, reason = geometry_commit_acceptance(result)
+                if not ready:
+                    raise ValueError(reason)
+                ready, reason = attachment_acceptance(result, capture.model)
+                if not ready:
+                    raise ValueError(reason)
+                request = edit_token.payload if edit_token is not None else None
+                _verify_atlas_separation(result, capture.model, request)
+                groups = group_uv_guides(result.get("guides", []))
+                if self.edits.enabled:
+                    missing = {item["guide_id"] for item in self.edits.handles.values()} - {item["id"] for item in groups}
+                    if missing:
+                        raise ValueError("The constrained edit basis refers to missing preview guides.")
+                self.ensure_owner_context(evaluation_cancelled)
+                self.status.Text = "NATIVE CONVERSION: constructing exact disposable NURBS and Breps..."
+                breps, guides, conversion = make_native_geometry(result, Rhino.Geometry, evaluation_cancelled, self.native_screen.context)
+                self.status.Text = ("NATIVE OWNER SCREEN: checking complete captured owners and current patches.\n"
+                                    "Esc between supported operations; one native call cannot be force-interrupted.")
+                self.native_screen.screen(breps, result, request=request, cancelled=evaluation_cancelled,
+                                          guides=guides, conversion=conversion)
+                if edit_token is not None:
+                    self.edits.accept(edit_token, result)
                 if self.state.complete(token, True):
                     self.conduit.replace(breps, guides)
                     breps, guides = [], []
                     self.output = result
-                    self.status.Text = ("READY: experimental partial result at handle {0:.2f}\n"
-                                        "{1} native patches + {2} exact guides | {3:.2f} s\n{4}").format(
-                                            token[1], len(self.conduit.breps), len(self.conduit.guides),
+                    self.attachment_ready, self.attachment_reason = attachment_acceptance(result, capture.model)
+                    self.valid_edit_token = edit_token
+                    self.refresh_guide_choices(groups)
+                    self.limitation.Text = ("EXPERIMENTAL NATIVE-SCREENED PREVIEW\n"
+                                            "Numerical attachments, projected atlas and bounded owner screening completed. "
+                                            "This is not a global nonintersection certificate or a verified native UI release.")
+                    mode = ("Selected U/V handle result" if edit_token is not None else
+                            "Baseline preview only; local handle editing is unavailable")
+                    self.status.Text = ("{0}: {1}\n{2}\nNative owner receipt: current bounded screen completed.\n"
+                                        "{3} native patches + {4} exact guides | {5:.2f} s\n{6}").format(
+                                            "READY" if self.attachment_ready else "INSPECTION ONLY", mode,
+                                            self.attachment_reason, len(self.conduit.breps), len(self.conduit.guides),
                                             time.monotonic() - started, _metric_text(result))
                 elif not self.state.cancelled:
+                    self.native_screen.invalidate()
                     self.status.Text = "UPDATING: a newer handle setting is pending."
             except Exception as error:
-                reason = ("The 60-second build budget expired between supported operations."
+                self.native_screen.invalidate()
+                reason = ("The {0:g}-second build budget expired between supported operations.".format(budget_seconds)
                           if self.timed_out else str(error)
                           if isinstance(error, (ValueError, RuntimeError)) else type(error).__name__)
                 self.state.complete(token, False, reason)
                 if not self.state.closed and not self.state.cancelled:
                     # Only a rejected CURRENT revision may reset the slider.
                     # A newer request arriving while computing keeps priority.
-                    if token[0] == self.state.revision and self.state.restore_last_valid():
-                        self.suppress_changes = True
-                        try:
-                            self.slider.Value = int(round(self.state.valid_h * 100))
-                            self.value.Text = "{:.2f}".format(self.state.valid_h)
-                        finally:
-                            self.suppress_changes = False
-                        self.status.Text = ("REJECTED handle {0:.2f}: {1}\n"
-                                            "Slider and preview restored to {2:.2f}. Enter accepts this restored "
-                                            "EXPERIMENTAL PARTIAL result.\n{3}").format(
-                                                token[1], reason, self.state.valid_h, _metric_text(self.output))
+                    if token[0] != self.state.revision:
+                        self.status.Text = "UPDATING: rebuilding the newer handle setting."
+                    elif self.state.restore_last_valid():
+                        if self.edits is not None and self.edits.enabled:
+                            self.edits.restore_last_valid()
+                        self.refresh_handle_controls()
+                        self.update_selection_display()
+                        self.status.Text = ("REJECTED selected handle edit: {0}\n"
+                                            "Handle values and preview restored. A new Enter first rebuilds exact native copies "
+                                            "and obtains a fresh native separation receipt.\n{1}").format(reason, _metric_text(self.output))
                     else:
                         self.status.Text = "BLOCKED: " + reason + "\nNo current result can be accepted."
             finally:
                 self.deadline = None
                 _dispose_all(breps + guides)
+                if self.state.pending and not self.state.cancelled and not self.state.closed:
+                    self.timer.Start()
+                doc.Views.Redraw()
+
+        def ensure_owner_context(self, cancelled):
+            if self.native_screen.context is None:
+                self.status.Text = "NATIVE OWNER SNAPSHOT: copying verified original owners; sources remain unchanged..."
+                api = _native_owner_api()
+                limits = api.ScreenLimits(seconds=NATIVE_SCREEN_SECONDS)
+                self.native_screen.context = api.create_owner_context(doc, capture, Rhino, cancelled=cancelled, limits=limits)
+
+        def rescreen_restored_preview(self):
+            """A discarded receipt is never revived merely by restoring values."""
+            revision = self.state.revision
+            breps, guides = [], []
+            self.state.building = True
+            self.deadline = time.monotonic() + CACHED_BUILD_SECONDS
+            self.timed_out = False
+            def stale():
+                return self.cancelled() or self.state.revision != revision
+            try:
+                self.native_screen.invalidate()
+                self.status.Text = "RECHECKING RESTORED PREVIEW: rebuilding exact native copies and screening owners (60-second budget)..."
+                self.ensure_owner_context(stale)
+                request = self.valid_edit_token.payload if self.valid_edit_token is not None else None
+                ready, reason = geometry_commit_acceptance(self.output)
+                if not ready:
+                    raise ValueError(reason)
+                _verify_atlas_separation(self.output, capture.model, request)
+                breps, guides, conversion = make_native_geometry(self.output, Rhino.Geometry, stale, self.native_screen.context)
+                self.native_screen.screen(breps, self.output, request=request, cancelled=stale,
+                                          guides=guides, conversion=conversion)
+                if stale():
+                    raise RuntimeError("The restored-preview screen was cancelled or superseded.")
+                self.conduit.replace(breps, guides)
+                breps, guides = [], []
+                self.update_selection_display()
+                self.status.Text = "EXPERIMENTAL READY: a fresh bounded native separation screen completed for the restored result."
+                return True
+            except Exception as error:
+                self.native_screen.invalidate()
+                reason = ("The 60-second restored-preview screen budget expired."
+                          if self.timed_out else str(error)
+                          if isinstance(error, (ValueError, RuntimeError)) else type(error).__name__)
+                self.status.Text = "ACCEPTANCE BLOCKED: " + reason
+                return False
+            finally:
+                self.deadline = None
+                self.state.building = False
+                _dispose_all(breps + guides)
+                self.refresh_handle_controls()
                 if self.state.pending and not self.state.cancelled and not self.state.closed:
                     self.timer.Start()
                 doc.Views.Redraw()
@@ -582,10 +1472,32 @@ def run(doc, capture, kernel):
                 return False
             if not self.state.can_accept:
                 return False
+            self.attachment_ready, self.attachment_reason = attachment_acceptance(self.output, capture.model)
+            if not self.attachment_ready:
+                self.status.Text = "ACCEPTANCE BLOCKED: " + self.attachment_reason + "\n" + _metric_text(self.output)
+                return False
+            if self.edits is not None and self.edits.enabled:
+                if (self.valid_edit_token is None or
+                        dict(self.valid_edit_token.values) != self.edits.values):
+                    return False
+                self.edits.verify_displayed_result(self.valid_edit_token, self.output)
             ok, reason = capture.verify_sources(doc)
             if not ok:
                 self.state.error = "Source proof changed."
                 self.status.Text = "BLOCKED: sources changed during preview. " + reason
+                return False
+            if self.native_screen.receipt is None and not self.rescreen_restored_preview():
+                return False
+            if not self.state.can_accept:
+                return False
+            try:
+                request = self.valid_edit_token.payload if self.valid_edit_token is not None else None
+                self.native_screen.verify(self.conduit.breps, self.output, request=request,
+                                          cancelled=lambda: self.state.closed or self.state.cancelled,
+                                          guides=self.conduit.guides)
+            except Exception as error:
+                self.native_screen.invalidate()
+                self.status.Text = "ACCEPTANCE BLOCKED: " + str(error)
                 return False
             return True
 
@@ -595,6 +1507,7 @@ def run(doc, capture, kernel):
             self.disposed = True
             self.closing_for_command = True
             self.state.close()
+            self.native_screen.invalidate()
             # Every unsubscribe/dispose is isolated: a queued event or an
             # already disposed Eto control cannot strand the native conduit.
             def unhook_escape():
@@ -602,6 +1515,12 @@ def run(doc, capture, kernel):
             def unhook_slider():
                 self.slider.ValueChanged -= self.on_change
                 self.slider.KeyDown -= self.on_key
+            def unhook_guide_selector():
+                self.guide_selector.SelectedIndexChanged -= self.on_guide_change
+                self.guide_selector.KeyDown -= self.on_key
+            def unhook_handle_selector():
+                self.handle_selector.SelectedIndexChanged -= self.on_handle_change
+                self.handle_selector.KeyDown -= self.on_key
             def unhook_timer():
                 self.timer.Elapsed -= self.on_tick
             def unhook_form():
@@ -609,8 +1528,9 @@ def run(doc, capture, kernel):
                 self.form.KeyDown -= self.on_key
             def unhook_status():
                 self.status.KeyDown -= self.on_key
-            for action in (unhook_escape, self.timer.Stop, self.conduit.close,
-                           unhook_slider, unhook_timer, unhook_form, unhook_status,
+            for action in (unhook_escape, self.timer.Stop, self.conduit.close, self.native_screen.close,
+                           unhook_slider, unhook_guide_selector, unhook_handle_selector,
+                           unhook_timer, unhook_form, unhook_status,
                            self.form.Close, self.form.Dispose, self.timer.Dispose,
                            doc.Views.Redraw):
                 _safe_cleanup(action)
@@ -621,7 +1541,7 @@ def run(doc, capture, kernel):
         session.form.Show()
         session.rebuild()
         decision = Rhino.Input.Custom.GetOption()
-        decision.SetCommandPrompt("Smart Skin EXPERIMENTAL PARTIAL: Enter/Space/right-click accepts upper-corner and source-end G1/G2 failures; Esc cancels")
+        decision.SetCommandPrompt("Smart Skin U/V guide inspection: acceptance requires full finite-boundary attachments; Esc cancels")
         decision.AcceptNothing(True)
         decision.SetWaitDuration(100)
         while not session.state.cancelled and session.form.Visible:
@@ -645,9 +1565,13 @@ def run(doc, capture, kernel):
         if session.accept_requested and session.prepare_acceptance():
             skin_count, guide_count = commit_new_geometry(
                 doc, capture, session.conduit.breps, session.conduit.guides,
-                session.state.valid_h, Rhino, System)
-            Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1 ACCEPTED_EXPERIMENTAL_PARTIAL | skin={0} | guides={1} | handle={2:.2f} | sources=unchanged | full_G2=NOT_VERIFIED".format(
-                skin_count, guide_count, session.state.valid_h))
+                session.state.valid_h, Rhino, System, attachment_result=session.output,
+                edit_request=session.valid_edit_token.payload if session.valid_edit_token is not None else None,
+                edit_state=session.edits if session.valid_edit_token is not None else None,
+                cancelled=lambda: session.disposed or session.state.closed or session.state.cancelled,
+                native_screen=session.native_screen)
+            Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1 ACCEPTED_SELECTED_UV_PROTOTYPE | skin={0} | guides={1} | mode={2} | sources=unchanged | full_G2=NOT_VERIFIED".format(
+                skin_count, guide_count, "SELECTED_HANDLE" if session.valid_edit_token is not None else "BASELINE"))
             return True
         Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1 CANCELLED | added=0 | sources=unchanged")
         return False

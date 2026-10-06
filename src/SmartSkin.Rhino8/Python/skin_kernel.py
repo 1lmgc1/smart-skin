@@ -1,21 +1,26 @@
 """Bounded native-network skin construction, independent of Rhino.
 
-Five prescribed geometric-Hermite sections, nine fixed longitudinal rows,
-quintic native-jet collars, and four central bands. The only live parameter is
-``h``: native first/second cross handles scale by h/h**2. Correspondence,
-profiles, native source knots, and artificial joins never depend on h.
+Five geometric-Hermite profiles, native-jet collars and four central bands
+form a bounded source-derived network. Production fixes the baseline at h=1,
+repairs the approved upper hard points and regular lower corners, then exposes
+individually selected mirror-coupled U/V handles. Visible rows and explicit
+corner guides follow the repaired atlas rather than a fixed historical count.
+The research build_model API retains the quadratic native-handle h family.
 
-This is an experimental bounded-family constructor, not a global G2 solver.
-Validation is finite sampled evidence; source boundary corner failures remain
-visible. Homogeneous upper curves are retained algebraically, including weights
-arbitrarily close to one. All public knots are FULL standard B-spline knots;
-Rhino's compact knot collections omit the first and last entries.
+This is not a global G2 solver. Acceptance requires fresh complete native and
+shared attachment evidence, with only captured upper source points excepted.
+Rational source curves remain homogeneous. Public knots are FULL standard
+B-spline knots; Rhino's compact knots omit the first and last entries.
 
 Compatible dependencies: numpy 1.26.4, scipy 1.13.1, mpmath 1.3.0.
 """
 from __future__ import annotations
 
 import math
+import copy
+import bisect
+import sys
+from fractions import Fraction
 import time
 from functools import lru_cache
 
@@ -330,6 +335,16 @@ class _Evaluator:
     """Reuse tensor bases and quotient jets during bounded validation."""
     def __init__(self,record):
         self.cp=np.asarray(record['homogeneous_cp'],float)
+        self.origin=self.cp[0,0,:3]/self.cp[0,0,3]
+        # Exact dyadic translation before one local binary64 rounding avoids
+        # world-coordinate cancellation. Exported control points are untouched.
+        self.local_cp=self.cp.copy()
+        origin_exact=[Fraction(float(x)) for x in self.origin]
+        for i in range(self.cp.shape[0]):
+            for j in range(self.cp.shape[1]):
+                w=Fraction(float(self.cp[i,j,3]))
+                for k in range(3):
+                    self.local_cp[i,j,k]=float(Fraction(float(self.cp[i,j,k]))-w*origin_exact[k])
         self.pu,self.pv=record['degree_u'],record['degree_v']
         self.bu=BSpline(record['knots_u'],np.eye(self.cp.shape[0]),self.pu,extrapolate=False)
         self.bv=BSpline(record['knots_v'],np.eye(self.cp.shape[1]),self.pv,extrapolate=False)
@@ -341,7 +356,7 @@ class _Evaluator:
             self.ucache[u]=np.asarray([self.bu(u,nu=i) if i<=self.pu else np.zeros(self.cp.shape[0]) for i in range(3)])
         if v not in self.vcache:
             self.vcache[v]=np.asarray([self.bv(v,nu=i) if i<=self.pv else np.zeros(self.cp.shape[1]) for i in range(3)])
-        left=(self.ucache[u]@self.cp.reshape(self.cp.shape[0],-1)).reshape(3,self.cp.shape[1],4)
+        left=(self.ucache[u]@self.local_cp.reshape(self.cp.shape[0],-1)).reshape(3,self.cp.shape[1],4)
         hd=np.einsum('ijc,kj->ikc',left,self.vcache[v])
         out={}
         for i in range(3):
@@ -352,9 +367,108 @@ class _Evaluator:
                         if a or b:x-=math.comb(i,a)*math.comb(j,b)*hd[a,b,3]*out[i-a,j-b]
                 out[i,j]=x/hd[0,0,3]
         result=[out[d] for d in ((0,0),(1,0),(0,1),(2,0),(1,1),(0,2))]
+        result[0]=result[0]+self.origin
         self.cache[key]=result
         return result
 
+
+
+@lru_cache(maxsize=1024)
+def _precise_basis(knots,degree,parameter,order):
+    """80-digit B-spline basis derivatives of exact binary64 input values."""
+    with mp.workdps(80):
+        values=tuple(mp.mpf(float(x)) for x in knots);t=mp.mpf(float(parameter))
+        @lru_cache(None)
+        def basis(i,p,d):
+            if i<0 or i+p+1>=len(values):return mp.mpf(0)
+            if d:
+                if not p:return mp.mpf(0)
+                a=p/(values[i+p]-values[i])*basis(i,p-1,d-1) if values[i+p]!=values[i] else 0
+                b=p/(values[i+p+1]-values[i+1])*basis(i+1,p-1,d-1) if values[i+p+1]!=values[i+1] else 0
+                return a-b
+            if p==0:return mp.mpf(int(values[i]<=t<values[i+1] or (t==values[-1] and values[i]<t==values[i+1])))
+            a=(t-values[i])/(values[i+p]-values[i])*basis(i,p-1,0) if values[i+p]!=values[i] else 0
+            b=(values[i+p+1]-t)/(values[i+p+1]-values[i+1])*basis(i+1,p-1,0) if values[i+p+1]!=values[i+1] else 0
+            return a+b
+        count=len(values)-degree-1
+        span=min(count-1,max(degree,bisect.bisect_right(knots,float(parameter))-1))
+        # Compact support keeps cache memory bounded independently of native
+        # span count. At most degree+1 entries survive.
+        return tuple((i,basis(i,degree,order)) for i in range(max(0,span-degree),min(count,span+1)))
+
+
+class _PreciseEvaluator:
+    """Bounded high-precision readback for ill-conditioned approved charts.
+
+    It evaluates the actual stored coefficients. It never substitutes the
+    pre-encoding construction or excludes a positive-radius neighborhood.
+    """
+    def __init__(self,record,cancelled=None):
+        cp=np.asarray(record['homogeneous_cp'],float)
+        self.pu,self.pv=int(record['degree_u']),int(record['degree_v'])
+        self.ku,self.kv=tuple(map(float,record['knots_u'])),tuple(map(float,record['knots_v']))
+        if cp.ndim!=3 or cp.shape[2]!=4 or cp.shape[0]*cp.shape[1]>16384 or max(self.pu,self.pv)>40 or min(self.pu,self.pv)<1:
+            raise UnsupportedFamily('Precise evaluator degree/control budget exceeded.')
+        if len(self.ku)!=cp.shape[0]+self.pu+1 or len(self.kv)!=cp.shape[1]+self.pv+1 or not np.isfinite(cp).all() or np.min(cp[:,:,3])<=0:
+            raise UnsupportedFamily('Invalid precise NURBS descriptor.')
+        self.shape=cp.shape;self.cancelled=cancelled;self.cache={}
+        with mp.workdps(80):self.cp=[[[mp.mpf(float(x)) for x in point] for point in row] for row in cp]
+    def jets(self,u,v):
+        key=(float(u),float(v));_check(self.cancelled)
+        if key in self.cache:return self.cache[key]
+        with mp.workdps(80):
+            U=[_precise_basis(self.ku,self.pu,key[0],k) for k in range(3)]
+            V=[_precise_basis(self.kv,self.pv,key[1],k) for k in range(3)]
+            pairs=((0,0),(1,0),(0,1),(2,0),(1,1),(0,2));H={};X={}
+            for a,b in pairs:
+                _check(self.cancelled)
+                terms=[[] for _ in range(4)]
+                for index,(i,ui) in enumerate(U[a]):
+                    if index%16==0:_check(self.cancelled)
+                    if not ui:continue
+                    for j,vj in V[b]:
+                        if vj:
+                            q=ui*vj
+                            for c in range(4):terms[c].append(q*self.cp[i][j][c])
+                H[a,b]=[mp.fsum(x) for x in terms]
+            weight=H[0,0][3]
+            if weight<=0:raise UnsupportedFamily('Nonpositive evaluated rational weight.')
+            for a,b in pairs:
+                x=mp.matrix(H[a,b][:3])
+                for i in range(a+1):
+                    for j in range(b+1):
+                        if i+j:x-=math.comb(a,i)*math.comb(b,j)*H[i,j][3]*X[a-i,b-j]
+                X[a,b]=x/weight
+            result=tuple(X[p] for p in pairs)
+        if len(self.cache)>=2048:self.cache.clear()
+        self.cache[key]=result
+        return result
+
+
+def _precise_geometry(values):
+    with mp.workdps(80):
+        _,a,b,aa,ab,bb=values
+        cross=mp.matrix([a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]])
+        area=mp.norm(cross)
+        if not area:return None
+        normal=cross/area;jac=mp.matrix([[a[k],b[k]] for k in range(3)])
+        metric=jac.T*jac
+        if not mp.det(metric):return None
+        second=mp.matrix([[mp.fdot(normal,aa),mp.fdot(normal,ab)],[mp.fdot(normal,ab),mp.fdot(normal,bb)]])
+        inverse=metric**-1;shape=jac*inverse*second*inverse*jac.T
+        return normal,shape
+
+
+def _precise_compare(a,b):
+    with mp.workdps(80):
+        left,right=_precise_geometry(a),_precise_geometry(b)
+        if left is None or right is None:return math.inf,math.inf
+        na,wa=left;nb,wb=right
+        if mp.fdot(na,nb)<0:nb,wb=-nb,-wb
+        cross=mp.matrix([na[1]*nb[2]-na[2]*nb[1],na[2]*nb[0]-na[0]*nb[2],na[0]*nb[1]-na[1]*nb[0]])
+        angle=mp.atan2(mp.norm(cross),mp.fdot(na,nb))*180/mp.pi
+        difference=wa-wb;difference=(difference+difference.T)/2
+        return float(angle),float(max(abs(x) for x in mp.eigsy(difference,eigvals_only=True)))
 
 def _geometry(jets):
     if not np.all(np.isfinite(np.asarray(jets,float))):
@@ -366,11 +480,13 @@ def _geometry(jets):
     if sine<1e-10 or min(lu,lv)<=1e-14:
         return None,float(sine)
     normal=cross/area
-    jac=np.column_stack([du,dv]);metric=jac.T@jac
-    try: inv=np.linalg.inv(metric)
-    except np.linalg.LinAlgError: return None,float(sine)
+    # Orthogonal tangent frame avoids squaring the chart's condition number.
+    q0=du/lu;r01=float(q0@dv);orthogonal=dv-r01*q0;r11=float(np.linalg.norm(orthogonal))
+    if r11<=np.finfo(float).tiny:return None,float(sine)
+    q=np.column_stack([q0,orthogonal/r11])
+    inverse=np.array([[1./lu,-r01/(lu*r11)],[0.,1./r11]])
     second=np.array([[normal@duu,normal@duv],[normal@duv,normal@dvv]])
-    shape=jac@inv@second@inv@jac.T
+    shape=q@inverse.T@second@inverse@q.T
     return (normal,shape),float(sine)
 
 
@@ -382,9 +498,23 @@ def _compare_geometry(a,b):
     return float(angle),float(np.linalg.norm(ka-kb,ord=2))
 
 
+def _source_frame_scale(spec):
+    """Endpoint bounding-box diagonal in the captured, rotation-covariant frame."""
+    n=_unit(spec['upper_plane_normal']);t=_unit(spec['transverse_direction'])
+    if abs(float(n@t))>1e-7:
+        raise UnsupportedFamily('The transverse direction must lie in the native upper plane.')
+    b=_unit(np.cross(n,t));t=_unit(np.cross(b,n))
+    points=np.asarray([x['p0'] for x in spec['profiles']]+[x['p1'] for x in spec['profiles']],float)
+    if points.shape!=(10,3) or not np.all(np.isfinite(points)):
+        raise UnsupportedFamily('Five finite profile endpoint pairs are required.')
+    local=(points-points[0])@np.column_stack((n,t,b))
+    return max(float(np.linalg.norm(np.ptp(local,axis=0))),1e-9)
+
+
 class SkinModel:
     """Fixed network and exact quadratic-in-h coefficient cache."""
-    def __init__(self,spec,cancelled=None):
+    def __init__(self,spec,cancelled=None,_fixed_h1=False):
+        self._fixed_h1=bool(_fixed_h1)
         self.spec=spec
         self.cancelled=cancelled or spec.get('cancelled')
         seconds=float(spec.get('build_timeout_seconds',90))
@@ -413,8 +543,7 @@ class SkinModel:
             cp=hermite_control_points(p0,p1,s0*t0,s1*t1,s0*s0*k0+float(section.get('accel0',0))*t0,
                                       s1*s1*k1+float(section.get('accel1',0))*t1)
             self.profiles.append(bernstein_to_power(cp))
-        allpoints=np.concatenate([np.asarray(x['p0'],float)[None] for x in spec['profiles']]+[np.asarray(x['p1'],float)[None] for x in spec['profiles']])
-        self.scale=max(float(np.linalg.norm(np.ptp(allpoints,axis=0))),1e-9)
+        self.scale=_source_frame_scale(spec)
         self.tolerance=float(spec.get('absolute_tolerance',spec.get('tolerance',max(self.scale*1e-7,1e-9))))
         if not np.isfinite(self.tolerance) or self.tolerance<=0:
             raise UnsupportedFamily('A finite positive model tolerance is required.')
@@ -482,20 +611,30 @@ class SkinModel:
         # depend only on fixed top boundary jets. Thus this cache is algebraic,
         # not a sampled geometric surrogate.
         with mp.workdps(60):
-            zero=self._construct(0.0)
-            plus=self._construct(1.0)
-            minus=self._construct(-1.0)
-            self.cache=[]
-            for z,p,m in zip(zero,plus,minus):
-                if (z['shape']!=p['shape'] or z['shape']!=m['shape']):
-                    raise UnsupportedFamily("Quadratic cache changed its fixed tensor topology.")
-                self.cache.append((z,(p['cp']-m['cp'])/2,(p['cp']+m['cp'])/2-z['cp']))
-            self.cache_error=self._check_cache()
+            if self._fixed_h1:
+                # Production uses actual selected U/V edits, not a global h
+                # slider. Do not build three unused source-handle variants.
+                baseline=self._construct(1.0)
+                self.cache=[(x,np.zeros_like(x['cp']),np.zeros_like(x['cp'])) for x in baseline]
+                self.cache_error=0.0
+            else:
+                zero=self._construct(0.0)
+                plus=self._construct(1.0)
+                minus=self._construct(-1.0)
+                self.cache=[]
+                for z,p,m in zip(zero,plus,minus):
+                    if (z['shape']!=p['shape'] or z['shape']!=m['shape']):
+                        raise UnsupportedFamily("Quadratic cache changed its fixed tensor topology.")
+                    self.cache.append((z,(p['cp']-m['cp'])/2,(p['cp']+m['cp'])/2-z['cp']))
+                self.cache_error=self._check_cache()
         self.network={'profile_count':5,'row_count':9,'profile_parameters':row_t.tolist(),
                       'native_v':self.rows.tolist(),'native_v_breaks':list(self.breaks),
                       'native_u_breaks':[[x['ua'] for x in p]+[1.0] for p in self.upper],
                       'density_policy':'five sections; seven active rows and two context rows; fixed while h changes',
                       'source_handle_policy':'d(h)=h*d(1), dd(h)=h^2*dd(1)'}
+        if self._fixed_h1:
+            self.network['production_baseline_h']=1.0
+            self.network['source_handle_policy']='Fixed native source baseline h=1; only selected generated U/V handles are live.'
 
     def _checkpoint(self):
         _check(self.cancelled)
@@ -762,6 +901,8 @@ class SkinModel:
     def evaluate(self,h=1.0,validate=True,cancelled=None):
         h=float(h);callback=cancelled or self.cancelled
         _check(callback)
+        if self._fixed_h1 and h!=1.0:
+            raise ValueError('Production baseline h is fixed at1; select a generated U/V handle instead.')
         if not .5<=h<=1.5 or not np.isfinite(h):
             raise ValueError("Curvature handle factor must be finite and in [0.5,1.5].")
         surfaces=[]
@@ -938,5 +1079,205 @@ def build_model(spec,cancelled=None):
     return SkinModel(spec,cancelled)
 
 
+def _regular_lower_corner_preflight(spec, scale):
+    """Necessary native-parent condition; never authorizes an extra singularity."""
+    evidence=spec.get('source_boundaries',{})
+    if not evidence.get('complete'):
+        raise UnsupportedFamily('NATIVE_BOUNDARY_EVIDENCE: Complete owner evidence is required.')
+    roles=evidence.get('roles',{});tolerance=float(spec['absolute_tolerance'])
+    curvature=float(spec.get('curvature_tolerance',max(1e-5/scale,1e-8)))
+    angle=math.degrees(float(spec.get('angle_tolerance',math.radians(.1))))
+    if not np.isfinite(curvature) or curvature<=0 or not np.isfinite(angle) or not 0<angle<90:
+        raise UnsupportedFamily('Finite positive attachment tolerances are required.')
+    results=[]
+    for side in (0,1):
+        records=roles.get('side'+str(side),[])
+        if len(records)!=1:raise UnsupportedFamily('NATIVE_BOUNDARY_EVIDENCE: Ambiguous natural side ownership.')
+        record=records[0];parameter=record['traversal_domain'][1]
+        source=min(record['reference_corners'],key=lambda x:abs(x['edge_parameter']-parameter))
+        if abs(source['edge_parameter']-parameter)>1e-10*max(1,abs(parameter)):
+            raise UnsupportedFamily('NATIVE_BOUNDARY_EVIDENCE: Missing exact source-bottom endpoint.')
+        matches=[c for lower in roles.get('lower',[]) for c in lower['reference_corners'] if np.linalg.norm(np.asarray(c['point'])-np.asarray(source['point']))<=tolerance]
+        if not matches:raise UnsupportedFamily('NATIVE_BOUNDARY_EVIDENCE: Missing lower-corner owner.')
+        for lower in matches:
+            a,w=_compare_geometry((np.asarray(source['parent_normal']),np.asarray(source['shape_operator'])),(np.asarray(lower['parent_normal']),np.asarray(lower['shape_operator'])))
+            results.append(dict(side=side,normal_angle_degrees=a,operator_difference=w,maximum_compatible_operator_difference=2*curvature))
+            if a>2*angle or w>2*curvature:
+                raise UnsupportedFamily('LOWER_REGULAR_CORNER_INCOMPATIBLE: The selected lower and side parents differ by %.9g in full curvature operator; two regular attachments each limited to %.9g cannot share this corner. Only upper hard-corner exceptions are authorized.'%(w,curvature))
+    return results
+
+
+
+def _approved_upper_corner_bindings(spec):
+    """Identity bindings are derived only from replay-validated source roles."""
+    roles=spec['source_boundaries']['roles'];result={}
+    def endpoint(record,index):
+        parameter=record['traversal_domain'][index]
+        matches=[c for c in record['reference_corners'] if c['edge_parameter']==parameter]
+        if len(matches)!=1:raise UnsupportedFamily('NATIVE_BOUNDARY_EVIDENCE: Ambiguous native source corner.')
+        return record['source_key'],parameter,np.asarray(matches[0]['point'],float)
+    for side in (0,1):
+        side_role='side'+str(side);side_record=roles[side_role][0]
+        upper_record=roles['upper'][0 if side==0 else -1]
+        upper_key,upper_parameter,upper_point=endpoint(upper_record,side)
+        side_key,side_parameter,side_point=endpoint(side_record,0)
+        if upper_key==side_key or np.linalg.norm(upper_point-side_point)>float(spec['absolute_tolerance']):
+            raise UnsupportedFamily('NATIVE_BOUNDARY_EVIDENCE: Upper and side roles do not share the captured vertex.')
+        identifier='upper:'+side_role
+        binding=dict(corner_id=identifier,role='upper_source_corner',side_role=side_role,upper_source_key=upper_key,upper_native_parameter=upper_parameter,side_source_key=side_key,side_native_parameter=side_parameter)
+        result[identifier]=dict(binding=binding,point=side_point)
+    return result
+
+class _PreparedNativeRepairs:
+    """Native-provenance-bound repaired baseline and per-value validation.
+
+    Numerical atlas checks cannot authorize their own native owner-separation
+    proof. Missing required checks keep editing/commit capability disabled.
+    """
+    def __init__(self,spec,cancelled=None):
+        started=time.monotonic();spec=copy.deepcopy(spec)
+        self._baseline_geometry=None;self._baseline_result=None;self._uv_edits=None
+        try:
+            import _smartskin_p08e1_native_family as family
+        except ModuleNotFoundError as error:
+            if error.name!='_smartskin_p08e1_native_family':raise
+            import native_family as family
+        try:
+            import _smartskin_p08e1_upper_corner_geometry as upper
+        except ModuleNotFoundError as error:
+            if error.name!='_smartskin_p08e1_upper_corner_geometry':raise
+            import upper_corner_geometry as upper
+        family.require_native_provenance(spec,cancelled)
+        self.approved_corners=_approved_upper_corner_bindings(spec)
+        scale=_source_frame_scale(spec)
+        self.lower_corner_preflight=_regular_lower_corner_preflight(spec,scale)
+        try:
+            import _smartskin_p08e1_upper_corner_certificate as certificate
+        except ModuleNotFoundError as error:
+            if error.name!='_smartskin_p08e1_upper_corner_certificate':raise
+            import upper_corner_certificate as certificate
+        self.upper_certificate=certificate
+        try:
+            import _smartskin_p08e1_lower_corner_geometry as lower
+        except ModuleNotFoundError as error:
+            if error.name!='_smartskin_p08e1_lower_corner_geometry':raise
+            import lower_corner_geometry as lower
+        self.lower_module=lower
+        self.upper_module=upper;self.spec=copy.deepcopy(spec);self.cancelled=cancelled
+        with mp.workdps(65):self.base=SkinModel(spec,cancelled,_fixed_h1=True)
+        if abs(self.base.breaks[1]-self.base.rows[0])>1e-12:
+            raise UnsupportedFamily('UPPER_CORNER_NATIVE_SPANS: This bounded hard-corner route requires no interior native V knot before the first design row.')
+        self.prepare_seconds=time.monotonic()-started
+    def handle_edit_catalog(self):
+        if self._uv_edits is not None:return self._uv_edits.handle_edit_catalog()
+        reason=(self._baseline_result or {}).get('reason','Complete numerical and native separation gates have not passed.')
+        return dict(schema='smartskin.uv-handles.v1',enabled=False,basis_id='',handles=[],reason=reason)
+    def _construct_geometry(self,h,callback):
+        _check(callback)
+        original=self.base.evaluate(h,validate=False,cancelled=callback)
+        body=self.lower_module.repair_lower(self.base,original,h,cancelled=callback)
+        upper=[]
+        with mp.workdps(65):
+            self.base._h=float(h)
+            for side in (0,1):
+                _check(callback);piece=self.base.upper[side][0];base=self.base._base(side,0,float(h))
+                patch=self.base._normal_compatibility(side,0,self.base._end_corrections(side,piece,0,base))
+                local=_tensor_u_restrict(base,piece['ua'],piece['ub'])
+                corner=self.upper_module.build_upper_corner(local,patch['p'],patch['w'],self.base.normal,side,position_tolerance=self.base.tolerance,numerical_scale=self.base.scale,cancelled=callback)
+                binding=self.approved_corners['upper:side'+str(side)]
+                a,b=corner['surfaces'];ea,eb=_Evaluator(a),_Evaluator(b)
+                na=_geometry(ea.jets(0.,.5))[0];nb=_geometry(eb.jets(0.,.5))[0]
+                if na is None or nb is None:raise UnsupportedFamily('A finite hard-corner boundary frame is singular.')
+                reference=_unit(na[0]-nb[0]);certificates=[]
+                for index,record in enumerate(corner['surfaces']):
+                    cp=np.asarray(record['homogeneous_cp'],float);point=cp[0,0,:3]/cp[0,0,3]
+                    error=float(np.linalg.norm(point-binding['point']))
+                    if error>corner['corner_reconciliation_limit']:
+                        raise UnsupportedFamily('The collapsed chart does not map to its approved captured source vertex.')
+                    record['source_corner_binding']=copy.deepcopy(binding['binding'])
+                    certificate=self.upper_certificate.certify_isolated_upper_chart(record,reference,1 if index==0 else -1,cancelled=callback)
+                    if not certificate['passed']:
+                        raise UnsupportedFamily('UPPER_RADIAL_REGULARITY: '+certificate['reason'])
+                    certificate['source_corner_binding']=copy.deepcopy(binding['binding'])
+                    certificates.append(certificate)
+                corner['regularity_certificates']=certificates
+                upper.append(corner)
+        result=self.upper_module.integrate_upper_cells(body,upper)
+        for record in result['surfaces']:
+            parity=record.get('side')==1
+            if record.get('kind')=='upper_hard_corner':parity ^= bool(record.get('orientation_reversed',False))
+            record['orientation_reversed']=bool(parity)
+        result['construction_report']={'source_modifications':0,'lower_corner_preflight':self.lower_corner_preflight,'upper_corner_construction_reports':[{k:v for k,v in x.items() if k!='surfaces'} for x in upper]}
+        return result
+    def evaluate(self,h=1.,validate=True,cancelled=None):
+        callback=cancelled or self.cancelled;_check(callback)
+        if type(h) not in (int,float) or not math.isfinite(float(h)) or float(h)!=1.:
+            raise UnsupportedFamily('The repaired production baseline is fixed at h=1; use selected U/V handles.')
+        start=time.monotonic();cold=self._baseline_geometry is None
+        if cold:
+            built=self._construct_geometry(1.,callback)
+            _check(callback);self._baseline_geometry=copy.deepcopy(built)
+        result=copy.deepcopy(self._baseline_geometry);constructed=time.monotonic()
+        if validate:
+            try:
+                import _smartskin_p08e1_repaired_validation as validator
+            except ModuleNotFoundError as error:
+                if error.name!='_smartskin_p08e1_repaired_validation':raise
+                import repaired_validation as validator
+            result.update(validator.validate_repaired(self.base,result,cancelled=callback))
+        else:
+            result.update(valid=False,geometry_valid=False,continuity_pass=False,experimental_commit_allowed=False,fatal=True,full_boundary_pass=False)
+            result['report']=dict(checked=False,fatal=True,full_boundary_pass=False,reason='Complete per-value validation was not requested; acceptance is disabled.')
+            result['metrics']=result['report'];result['reason']=result['report']['reason'];result.pop('attachment_proof',None)
+        validated=time.monotonic()
+        if validate and result.get('valid'):
+            self._screen_atlas_result(result,callback)
+        screened=time.monotonic()
+        proof=result.get('attachment_proof',{})
+        if validate and result.get('valid') and proof.get('checked') and proof.get('source_full_finite_boundary_pass') and proof.get('shared_full_finite_boundary_pass') and not proof.get('excluded_intervals'):
+            try:
+                import _smartskin_p08e1_constrained_uv as uv
+            except ModuleNotFoundError as error:
+                if error.name!='_smartskin_p08e1_constrained_uv':raise
+                import constrained_uv as uv
+            self._uv_edits=uv.PreparedUVEdits(self.base,result,self._validate_edit_candidate,sys.modules[__name__],cancelled=callback,validator_receives_result=True)
+        else:
+            self._uv_edits=None
+        _check(callback)
+        result['timing']=dict(prepare_seconds=self.prepare_seconds,cold_geometry=cold,geometry_seconds=constructed-start,validation_seconds=validated-constructed,atlas_screen_seconds=screened-validated,basis_seconds=time.monotonic()-screened,evaluate_seconds=time.monotonic()-start,native_conversion_included=False)
+        self._baseline_result=copy.deepcopy(result)
+        return result
+    def _screen_atlas_result(self,result,cancelled=None):
+        try:
+            import _smartskin_p08e1_atlas_separation as atlas
+        except ModuleNotFoundError as error:
+            if error.name!='_smartskin_p08e1_atlas_separation':raise
+            import atlas_separation as atlas
+        screen=atlas.screen_atlas(self.base,result,cancelled=cancelled)
+        result['atlas_separation']=screen
+        if screen.get('checked') is not True or screen.get('passed') is not True:
+            reason='ATLAS_SEPARATION: '+str(screen.get('reason','Bounded cap/cap screen did not pass.'))
+            result.update(valid=False,geometry_valid=False,fatal=True,experimental_commit_allowed=False,disposition='atlas_screen_failed',reason=reason)
+            result['report'].update(fatal=True,geometry_valid=False,disposition='atlas_screen_failed',reason=reason)
+        return result
+    def _validate_edit_candidate(self,candidate,cancelled=None):
+        # The edit layer supplies its current atlas and regenerated guide graph.
+        # It never sends stale neutral guides to the per-value validator.
+        if self._uv_edits is None or self._baseline_result is None:
+            raise UnsupportedFamily('The repaired edit basis has not been prepared.')
+        try:
+            import _smartskin_p08e1_repaired_validation as validator
+        except ModuleNotFoundError as error:
+            if error.name!='_smartskin_p08e1_repaired_validation':raise
+            import repaired_validation as validator
+        result=dict(candidate,**validator.validate_repaired(self.base,candidate,cancelled=cancelled))
+        if result.get('valid'):self._screen_atlas_result(result,cancelled)
+        return result
+    def evaluate_edit(self,request,cancelled=None):
+        if self._uv_edits is None:
+            raise UnsupportedFamily('Selected U/V editing requires a fully validated repaired baseline, including native owner separation.')
+        return self._uv_edits.evaluate_edit(request,cancelled=cancelled or self.cancelled)
+
+
 def prepare(spec,cancelled=None):
-    return build_model(spec,cancelled)
+    return _PreparedNativeRepairs(spec,cancelled)

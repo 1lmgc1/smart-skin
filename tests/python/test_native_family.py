@@ -9,7 +9,7 @@ import numpy as np
 from scipy.interpolate import BPoly
 
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[2]/'src/SmartSkin.Rhino8/Python'))
-from native_family import build_spec, ordered_cycle, _all_roots, UnsupportedFamily
+from native_family import build_spec, ordered_cycle, _all_roots, UnsupportedFamily, Curve, _central_upper_run, _parameterize_upper
 
 
 def curve(points,weights=None):
@@ -56,6 +56,29 @@ def transform(edges,rotation,translation,scale=1):
     return out
 
 
+def compound_upper_edges(rational_line=False):
+    """Same source loci and native spans, three upper edges versus one."""
+    split=synthetic_edges()
+    weights=[1,.8,.8,1] if rational_line else [1,1,1,1]
+    split[1]['curve']=curve([[0,y,0] for y in np.linspace(-4,4,4)],weights)
+    a=np.array(split[0]['curve']['homogeneous_cp'])
+    b=np.array(split[1]['curve']['homogeneous_cp'])
+    c=np.array(split[2]['curve']['homogeneous_cp'])[::-1]
+    joined=copy.deepcopy(split[0]);joined['key']='top-joined'
+    joined['curve']=dict(degree=3,knots=[0.]*4+[1.]*3+[2.]*3+[3.]*4,
+                         homogeneous_cp=np.concatenate([a,b[1:],c[1:]]).tolist(),domain=[0.,3.])
+    return split,[joined]+copy.deepcopy(split[3:])
+
+
+def path_points(path):
+    points=[]
+    for item in path:
+        c=Curve(item['curve']);ts=np.linspace(*c.domain,13)
+        if item['reverse']:ts=ts[::-1]
+        points.extend(c(ts))
+    return np.asarray(points)
+
+
 class NativeFamilyTests(unittest.TestCase):
     def test_generic_selection_builds_without_private_data(self):
         edges=synthetic_edges();before=json.dumps(edges,sort_keys=True)
@@ -85,6 +108,78 @@ class NativeFamilyTests(unittest.TestCase):
             c=e['curve'];c['homogeneous_cp']=c['homogeneous_cp'][::-1];c['knots']=[1-k for k in c['knots'][::-1]]
         spec=build_spec(edges,1e-5)
         self.assertEqual(len(spec['profiles']),5)
+
+    def test_compound_native_edge_equivalent_to_separate_edges(self):
+        for rational in (False,True):
+            split,joined=compound_upper_edges(rational)
+            before=json.dumps(joined,sort_keys=True)
+            a,b=build_spec(split,1e-5),build_spec(joined,1e-5)
+            self.assertEqual(before,json.dumps(joined,sort_keys=True))
+            for pa,pb in zip(a['profiles'],b['profiles']):
+                for key in pa:np.testing.assert_allclose(pa[key],pb[key],atol=2e-9)
+            for left,right in zip(a['upper_paths'],b['upper_paths']):
+                self.assertEqual(len(left),len(right))
+                np.testing.assert_allclose([x['u_interval'] for x in left],[x['u_interval'] for x in right],atol=2e-12)
+                np.testing.assert_allclose(path_points(left),path_points(right),atol=3e-13)
+            self.assertEqual(b['extraction_report']['source_edge_count'],4)
+
+    def test_curve_linearity_respects_restricted_compound_domain(self):
+        _,joined=compound_upper_edges(True)
+        record=copy.deepcopy(joined[0]['curve'])
+        self.assertFalse(Curve(record).linear(1e-7))
+        record['domain']=[1.,2.]
+        self.assertTrue(Curve(record).linear(1e-10))
+        before=json.dumps(record,sort_keys=True)
+        for lo,hi in ((1.,2.),(1.13,1.87)):
+            record['domain']=[lo,hi]
+            self.assertTrue(Curve(record).linear(1e-10))
+        record['domain']=[1.,2.]
+        self.assertEqual(before,json.dumps(record,sort_keys=True))
+
+    def test_compound_reverse_reorder_and_rigid_scale(self):
+        _,joined=compound_upper_edges(True)
+        baseline=build_spec(joined,1e-5)
+        for e in joined:
+            c=e['curve'];total=c['knots'][0]+c['knots'][-1]
+            c['homogeneous_cp']=c['homogeneous_cp'][::-1];c['knots']=[total-k for k in c['knots'][::-1]]
+        reverse=build_spec(joined[::-1],1e-5)
+        expected=baseline['profiles']
+        if np.dot(baseline['transverse_direction'],reverse['transverse_direction'])<0:
+            expected=list(reversed(expected))
+        for a,b in zip(expected,reverse['profiles']):
+            np.testing.assert_allclose(a['p0'],b['p0'],atol=1e-10)
+        theta=.51;R=np.array([[np.cos(theta),0,np.sin(theta)],[0,1,0],[-np.sin(theta),0,np.cos(theta)]])
+        translation=np.array([7.,-11.,13.]);scale=2.7
+        moved=build_spec(transform(joined,R,translation,scale),1e-5*scale)
+        for a,b in zip(reverse['profiles'],moved['profiles']):
+            np.testing.assert_allclose(scale*R@np.asarray(a['p0'])+translation,b['p0'],atol=1e-9)
+
+    def test_near_straight_curved_span_is_not_a_central_line(self):
+        edges=synthetic_edges()
+        edges[1]['curve']=curve([[0,-4,0],[0,-4/3,.002],[0,4/3,.002],[0,4,0]])
+        self.assertTrue(Curve(edges[1]['curve']).linear(.01))
+        with self.assertRaisesRegex(UnsupportedFamily,'UPPER_CENTRAL_LINE'):
+            build_spec(edges,.01)
+
+    def test_separated_or_offcenter_straight_runs_rejected(self):
+        def edge(key,points):return dict(key=key,curve=curve(points))
+        left=edge('left',[[0,-5,-1],[0,-5,-.2],[0,-4.5,0],[0,-4,0]])
+        right=edge('right',[[0,4,0],[0,4.5,0],[0,5,-.2],[0,5,-1]])
+        separated=[left,edge('a',[[0,-4,0],[0,-1,0]]),edge('bow',[[0,-1,0],[0,-.3,.2],[0,.3,.2],[0,1,0]]),edge('b',[[0,1,0],[0,4,0]]),right]
+        with self.assertRaisesRegex(UnsupportedFamily,'contiguous'):
+            _central_upper_run([(e,False) for e in separated],np.array([0,0,-1.]),np.array([0,1,0.]),1e-5)
+        offcenter=[left,edge('line',[[0,-4,0],[0,2,0]]),edge('tail',[[0,2,0],[0,3,0],[0,5,-.2],[0,5,-1]])]
+        with self.assertRaisesRegex(UnsupportedFamily,'centered'):
+            _central_upper_run([(e,False) for e in offcenter],np.array([0,0,-1.]),np.array([0,1,0.]),1e-5)
+
+    def test_upper_span_budget_and_cancel_before_quadrature(self):
+        from unittest.mock import patch
+        path=[dict(curve=curve([[0,i,0],[0,i+1,0]]),reverse=False) for i in range(17)]
+        with patch('native_family.quad',side_effect=AssertionError('Integration must not begin')):
+            with self.assertRaisesRegex(UnsupportedFamily,'UPPER_SPAN_BUDGET'):
+                _parameterize_upper(path,1e-5,np.array([0,1,0.]),np.zeros(3),1e-11)
+            with self.assertRaisesRegex(UnsupportedFamily,'CANCELLED'):
+                _parameterize_upper(path[:1],1e-5,np.array([0,1,0.]),np.zeros(3),1e-11,lambda:True)
 
     def test_asymmetric_upper_rejected(self):
         edges=synthetic_edges();edges[2]['curve']['homogeneous_cp'][1][2]+=.2

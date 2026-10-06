@@ -272,7 +272,9 @@ try {
         $Null = Invoke-Entry UNINSTALL $Restricted
         Assert-True (@(Get-OwnKeys).Count -eq 0) 'Uninstall retained or restored an own-GUID registration.'
         Assert-True (-not (Test-Path -LiteralPath (Join-Path $InstallRoot 'current\SmartSkin.Rhino8.rhp'))) 'Uninstall retained the managed plug-in.'
-        Assert-True (-not (Test-Path -LiteralPath (Join-Path $InstallRoot 'current\Python\smart_skin.py'))) 'Uninstall retained the managed Python entry point.'
+        foreach ($Asset in @('smart_skin.py', 'native_input.py', 'native_family.py', 'skin_kernel.py', 'preview.py', 'native_boundary_evidence.py', 'fan_shared_jets.py', 'fan_rational_fields.py', 'fan_geometry.py', 'lower_corner_geometry.py', 'upper_corner_geometry.py', 'upper_corner_certificate.py', 'constrained_uv.py', 'repaired_validation.py', 'native_owner_separation.py', 'atlas_separation.py')) {
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $InstallRoot ('current\Python\' + $Asset)))) "Uninstall retained a managed Python asset: $Asset"
+        }
         Assert-UnrelatedPreserved
         Assert-True (Test-Path -LiteralPath (Join-Path $InstallRoot 'current\keep-current-user.txt')) 'Uninstall deleted unrelated current file.'
         Assert-True (Test-Path -LiteralPath (Join-Path $InstallRoot 'current\Python\keep-current-user.py')) 'Uninstall deleted unrelated current Python file.'

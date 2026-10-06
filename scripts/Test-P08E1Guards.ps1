@@ -4,9 +4,9 @@ $ErrorActionPreference = 'Stop'
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Version = (Get-Content -LiteralPath (Join-Path $Root 'VERSION') -Raw).Trim()
 [xml]$Props = Get-Content -LiteralPath (Join-Path $Root 'Directory.Build.props') -Raw
-if ($Version -ne '0.0.16-p08e1f2' -or ($Props.Project.PropertyGroup.VersionPrefix + '-' + $Props.Project.PropertyGroup.VersionSuffix) -ne $Version) { throw 'P08E1 version identity mismatch.' }
+if ($Version -ne '0.0.17-p08e1f3' -or ($Props.Project.PropertyGroup.VersionPrefix + '-' + $Props.Project.PropertyGroup.VersionSuffix) -ne $Version) { throw 'P08E1 version identity mismatch.' }
 $Common = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Installer-Common.ps1') -Raw
-if ($Common -notmatch "SmartSkinVersion = '0.0.16-p08e1f2'" -or $Common -notmatch "SmartSkinRuntimeVersion = '0.0.16-p08e1f2'") { throw 'Installer/runtime version separation mismatch.' }
+if ($Common -notmatch "SmartSkinVersion = '0.0.17-p08e1f3'" -or $Common -notmatch "SmartSkinRuntimeVersion = '0.0.17-p08e1f3'") { throw 'Installer/runtime version separation mismatch.' }
 if ((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Install-SmartSkin.ps1') -Raw) -notmatch '\$Version = \$script:SmartSkinVersion') { throw 'Installer must report its bundle identity.' }
 [xml]$Plugin = Get-Content -LiteralPath (Join-Path $Root 'src/SmartSkin.Rhino8/SmartSkin.Rhino8.csproj') -Raw
 if ($Plugin.Project.PropertyGroup.TargetFramework -ne 'net48') { throw 'Native package must retain net48 compatibility.' }
@@ -30,4 +30,4 @@ Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' -Recurse | ForEach-Obje
 }
 if ($Errors.Count) { $Errors | ForEach-Object { Write-Host $_ }; throw 'PowerShell syntax validation failed.' }
 & (Join-Path $PSScriptRoot 'Test-Toolbar.ps1') -RuiPath (Join-Path $Root 'src/SmartSkin.Rhino8/SmartSkin.Rhino8.rui') -StructureOnly:($env:OS -ne 'Windows_NT')
-Write-Host 'SMARTSKIN_P08E1F2_GUARDS PASS | version/net48/GUID/toolbar/scripts=STATICALLY CHECKED | native_Rhino=NOT VERIFIED'
+Write-Host 'SMARTSKIN_P08E1F3_GUARDS PASS | version/net48/GUID/toolbar/scripts=STATICALLY CHECKED | native_Rhino=NOT VERIFIED'

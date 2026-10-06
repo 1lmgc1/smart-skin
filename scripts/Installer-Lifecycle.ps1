@@ -6,7 +6,10 @@ $script:SmartSkinKnownPluginFiles = @(
 )
 $script:SmartSkinKnownRuntimeFiles = $script:SmartSkinKnownPluginFiles + @(
     'Python/smart_skin.py', 'Python/native_input.py', 'Python/native_family.py',
-    'Python/skin_kernel.py', 'Python/preview.py'
+    'Python/skin_kernel.py', 'Python/preview.py', 'Python/native_boundary_evidence.py',
+    'Python/fan_shared_jets.py', 'Python/fan_rational_fields.py', 'Python/fan_geometry.py',
+    'Python/lower_corner_geometry.py', 'Python/upper_corner_geometry.py',
+    'Python/upper_corner_certificate.py', 'Python/constrained_uv.py', 'Python/repaired_validation.py', 'Python/native_owner_separation.py', 'Python/atlas_separation.py'
 )
 
 function Assert-InstallPackageLayout([string]$Root) {

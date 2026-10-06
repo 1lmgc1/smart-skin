@@ -74,6 +74,22 @@ try {
         Write-AtomicJson $ManifestPath $M
         Assert-Rejected { $null = Assert-Package $Bad } $Kind $Cases[$Kind]
     }
+    if ($ValidManifest.feature_status -eq 'EXPERIMENTAL_NATIVE_CURVATURE') {
+        # Each new module is independently mandatory. A source-only import must
+        # never make a package that omits a fan/provenance helper appear usable.
+        foreach ($Asset in @('native_boundary_evidence.py', 'fan_shared_jets.py', 'fan_rational_fields.py', 'fan_geometry.py', 'lower_corner_geometry.py', 'upper_corner_geometry.py', 'upper_corner_certificate.py', 'constrained_uv.py', 'repaired_validation.py', 'native_owner_separation.py', 'atlas_separation.py')) {
+            $Bad = Join-Path $TestRoot ('missing-' + $Asset)
+            New-Item -ItemType Directory -Path $Bad | Out-Null
+            Get-ChildItem -LiteralPath $PackageRoot -Force | Copy-Item -Destination $Bad -Recurse
+            $ManifestPath = Join-Path $Bad 'manifest.json'
+            $M = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+            $Relative = 'net48/Python/' + $Asset
+            $M.files = @($M.files | Where-Object { $_.path -ne $Relative })
+            Remove-Item -LiteralPath (Join-Path $Bad $Relative)
+            Write-AtomicJson $ManifestPath $M
+            Assert-Rejected { $null = Assert-Package $Bad } ('missing-' + $Asset) 'Required native curvature engine asset missing'
+        }
+    }
     Write-Host 'SMARTSKIN_PACKAGE_TEST PASS | metadata/manifests/atomic_json/log_failure=VERIFIED | Windows_lifecycle/native_Rhino=NOT VERIFIED'
 } finally {
     $script:SmartSkinLog = $null

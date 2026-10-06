@@ -9,7 +9,16 @@ import json
 import math
 import numpy as np
 from scipy.interpolate import BSpline, BPoly, PPoly
+from scipy.integrate import quad
 from scipy.optimize import brentq, least_squares, minimize
+
+
+try:
+    from _smartskin_p08e1_native_boundary_evidence import build_source_boundaries, require_complete_evidence, BoundaryEvidenceError
+except ModuleNotFoundError as error:
+    if error.name != '_smartskin_p08e1_native_boundary_evidence':
+        raise
+    from native_boundary_evidence import build_source_boundaries, require_complete_evidence, BoundaryEvidenceError
 
 
 class UnsupportedFamily(ValueError):
@@ -74,12 +83,35 @@ class Curve:
     def samples(self, count=33):
         return self(np.linspace(*self.domain, count))
 
+    def bezier_spans(self):
+        """Exact homogeneous knot insertion on the active source interval.
+
+        The source record, full control net, and original knots remain immutable.
+        Returned control nets are analytical restrictions, never sampled fits.
+        """
+        lo,hi=self.domain
+        if lo<self.knots[self.degree] or hi>self.knots[-self.degree-1]:
+            fail('CURVE_DOMAIN','Source interval lies outside its native curve domain.')
+        breaks=np.unique(np.r_[lo,self.knots[(self.knots>lo)&(self.knots<hi)],hi])
+        spline=self.b
+        for t in breaks:
+            multiplicity=int(np.count_nonzero(spline.t==t))
+            if multiplicity<self.degree:
+                spline=spline.insert_knot(float(t),self.degree-multiplicity)
+        spans=[]
+        for a,b in zip(breaks[:-1],breaks[1:]):
+            k=int(np.searchsorted(spline.t,(a+b)/2,side='right')-1)
+            spans.append((float(a),float(b),np.array(spline.c[k-self.degree:k+1],copy=True)))
+        return spans
+
     def linear(self, tolerance):
-        p = self.cp[:, :3] / self.cp[:, 3, None]
         direction = self(self.domain[1])-self(self.domain[0])
         if np.linalg.norm(direction) <= tolerance:
             return False
-        return np.max(np.linalg.norm(np.cross(p-self(self.domain[0]), unit(direction)), axis=1)) <= tolerance
+        # In particular, a line subinterval of a compound curve is tested on
+        # its own exact restricted control net, not unrelated parent handles.
+        p=np.concatenate([h[:,:3]/h[:,3,None] for _,_,h in self.bezier_spans()])
+        return np.max(np.linalg.norm(np.cross(p-self(self.domain[0]),unit(direction)),axis=1))<=tolerance
 
 
 class Surface:
@@ -413,28 +445,135 @@ def _path_to(chain,target_edge,target_t,from_start=True):
             else:b=target_t
         if b-a>1e-12:
             record=dict(edge['curve']);record['domain']=[float(a),float(b)]
-            path.append(dict(curve=record,reverse=rev))
+            path.append(dict(curve=record,reverse=rev,source_key=_key(edge),source_domain=list(c.domain),
+                             source_active_domain=[float(a),float(b)],source_boundary_role='upper'))
         if is_target:break
     if not path or _key(edge)!=_key(target_edge):fail('UPPER_PATH','Section is outside the native upper chain.')
     return path
 
 
-def _parameterize_upper(path,tol):
-    curved=[not Curve(p['curve']).linear(tol) for p in path]
-    # Straight terminal segment may be split by native vertices; collapse no source data.
-    first_linear=next((i for i,v in enumerate(curved) if not v),len(path))
-    if first_linear==len(path) or any(curved[first_linear:]):
-        fail('UPPER_CHAIN_LAYOUT','Each shoulder needs curved source pieces followed by a straight central chain.')
+def _upper_span_paths(path,cancelled=None):
+    """Virtual spans retaining original curve records and parameter provenance."""
+    out=[]
+    for item in path:
+        check_cancel(cancelled)
+        c=Curve(item['curve']);spans=c.bezier_spans()
+        if item.get('reverse',False):spans=list(reversed(spans))
+        for a,b,h in spans:
+            record=dict(item['curve']);record['domain']=[a,b]
+            out.append((dict(item,curve=record,source_active_domain=[float(a),float(b)]),h))
+    return out
+
+
+def _straight_span(h,direction,threshold):
+    p=h[:,:3]/h[:,3,None]
+    chord=p[-1]-p[0]
+    if abs(chord@direction)<=threshold:return False
+    return np.max(np.linalg.norm(np.cross(p-p[0],direction),axis=1))<=threshold
+
+
+def _central_upper_run(upper,origin,direction,tol,cancelled=None):
+    """Find one centered transverse straight run in exact native knot spans.
+
+    Straight recognition is a coefficient test with a tight, dimensionally
+    scaled numerical threshold: max(document tolerance*1e-6, extent*1e-10,
+    128*machine epsilon*coordinate magnitude). It is deliberately separate
+    from document-tolerance endpoint matching and generic topology checks.
+    """
+    spans=_upper_span_paths([dict(curve=e['curve'],reverse=rev) for e,rev in upper],cancelled)
+    points=np.concatenate([h[:,:3]/h[:,3,None] for _,h in spans])
+    extent=max(float(np.linalg.norm(np.ptp(points,axis=0))),tol)
+    magnitude=float(np.max(np.abs(points)))
+    threshold=max(tol*1e-6,extent*1e-10,128*np.finfo(float).eps*magnitude)
+    if threshold>tol*.01:
+        fail('UPPER_LINEARITY_PRECISION','Coordinates are too poorly resolved for exact straight-span recognition.')
+    indices=[i for i,(_,h) in enumerate(spans) if _straight_span(h,direction,threshold)]
+    if not indices:
+        fail('UPPER_CENTRAL_LINE','No coefficient-verified central straight native span.')
+    if indices!=list(range(indices[0],indices[-1]+1)):
+        fail('UPPER_CENTRAL_LINE','Straight upper spans do not form one contiguous central run.')
+    if indices[0]==0 or indices[-1]==len(spans)-1:
+        fail('UPPER_CENTRAL_LINE','The central straight run must lie between the two native shoulders.')
+    selected=[spans[i] for i in indices]
+    c0=Curve(selected[0][0]['curve']);line_origin=c0(c0.domain[1 if selected[0][0].get('reverse',False) else 0])
+    levels=[]
+    for item,h in selected:
+        p=h[:,:3]/h[:,3,None]
+        if item.get('reverse',False):p=p[::-1]
+        if np.max(np.linalg.norm(np.cross(p-line_origin,direction),axis=1))>threshold:
+            fail('UPPER_CENTRAL_LINE','Central straight spans do not share one transverse line.')
+        projected=(p-origin)@direction
+        if np.min(np.diff(projected)) < -threshold:
+            fail('UPPER_CENTRAL_LINE','The central straight run has nonmonotone native controls.')
+        levels.extend([float(projected[0]),float(projected[-1])])
+    lo,hi=min(levels),max(levels)
+    if not lo < -tol*10 or not hi > tol*10 or abs(lo+hi)>tol:
+        fail('UPPER_CENTRAL_LINE','The straight run is not centered on the derived symmetry section.')
+    return min(-lo,hi),line_origin,threshold
+
+
+def _parameterize_upper(path,tol,direction,line_origin,straight_threshold,cancelled=None):
+    # Canonical native spans make joined and separate source-edge descriptions
+    # use the same allocation. Arc length is integrated from exact rational
+    # derivatives; no 129-point chord-length approximation is used.
+    spans=_upper_span_paths(path,cancelled)
+    if len(spans)>16:
+        fail('UPPER_SPAN_BUDGET','Each upper shoulder is limited to16 exact native spans before integration.')
+    curved=[]
+    for item,h in spans:
+        p=h[:,:3]/h[:,3,None]
+        on_line=np.max(np.linalg.norm(np.cross(p-line_origin,direction),axis=1))<=straight_threshold
+        curved.append(not (_straight_span(h,direction,straight_threshold) and on_line))
+    first_linear=next((i for i,v in enumerate(curved) if not v),len(spans))
+    if first_linear==len(spans) or any(curved[first_linear:]):
+        fail('UPPER_CHAIN_LAYOUT','Each shoulder needs rounded native spans followed by the central straight run.')
     lengths=[]
-    for p in path:
-        q=Curve(p['curve']).samples(129);lengths.append(float(np.sum(np.linalg.norm(np.diff(q,axis=0),axis=1))))
+    for item,_ in spans:
+        check_cancel(cancelled)
+        c=Curve(item['curve'])
+        length=quad(lambda t:float(np.linalg.norm(c(t,1))),*c.domain,
+                    epsabs=max(straight_threshold*.01,np.finfo(float).tiny),epsrel=1e-12,limit=100)[0]
+        if not math.isfinite(length) or length<=straight_threshold:
+            fail('UPPER_CHAIN_LAYOUT','A native upper span has degenerate length.')
+        lengths.append(length)
     breaks=[0.]
     if first_linear:
         for i in range(first_linear):breaks.append(breaks[-1]+.2*lengths[i]/sum(lengths[:first_linear]))
-    for i in range(first_linear,len(path)):
+    for i in range(first_linear,len(spans)):
         breaks.append(breaks[-1]+(1-(.2 if first_linear else 0))*lengths[i]/sum(lengths[first_linear:]))
     breaks[-1]=1.
-    return [dict(p,u_interval=[float(breaks[i]),float(breaks[i+1])]) for i,p in enumerate(path)]
+    return [dict(item,u_interval=[float(breaks[i]),float(breaks[i+1])]) for i,(item,_) in enumerate(spans)]
+
+
+def _source_side_map(edge,natural,top,tol):
+    surface=Surface(edge['surface']);curve=Curve(edge['curve'])
+    domains=[surface.ud,surface.vd];cross_axis=natural[0];along_axis=1-cross_axis
+    cross_domain,along_domain=domains[cross_axis],domains[along_axis]
+    uv=[0.,0.];uv[cross_axis]=cross_domain[natural[1]];uv[along_axis]=along_domain[0]
+    reverse_along=np.linalg.norm(surface.jet(*uv)[0]-top)>tol
+    a=np.zeros((2,2));b=np.zeros(2)
+    a[cross_axis,0]=-1. if natural[1] else 1.
+    b[cross_axis]=sum(cross_domain) if natural[1] else 0.
+    a[along_axis,1]=(along_domain[1]-along_domain[0])*(-1. if reverse_along else 1.)
+    b[along_axis]=along_domain[1] if reverse_along else along_domain[0]
+    reverse_edge=np.linalg.norm(curve(curve.domain[0])-top)>tol
+    slope=(curve.domain[1]-curve.domain[0])*(-1. if reverse_edge else 1.)
+    offset=curve.domain[1] if reverse_edge else curve.domain[0]
+    return dict(native_uv_from_chart_uv=dict(matrix=a.tolist(),offset=b.tolist()),
+                chart_domain=[list(cross_domain),[0.,1.]],native_surface_domain=[list(x) for x in domains],
+                boundary_chart_u=float(cross_domain[0]),edge_parameter_from_chart_v=[float(slope),float(offset)])
+
+
+def require_native_provenance(model,cancelled=None):
+    """Production preview/fan gate, independent of numerical fixture extraction."""
+    try:
+        evidence=model.get('source_boundaries')
+        require_complete_evidence(evidence,float(model['absolute_tolerance']),Curve,Surface,cancelled)
+        if evidence['source_edge_count']!=model['extraction_report']['source_edge_count']:
+            fail('NATIVE_BOUNDARY_EVIDENCE','Validated owner coverage differs from the selected native edges.')
+    except BoundaryEvidenceError as error:
+        fail('NATIVE_BOUNDARY_EVIDENCE',str(error))
+    return True
 
 
 def build_spec(edges,tolerance,angle_tolerance=1e-3,cancelled=None):
@@ -466,6 +605,21 @@ def build_spec(edges,tolerance,angle_tolerance=1e-3,cancelled=None):
     if np.linalg.norm(_point(lower[0],0)-bottom0)>tol:lower=[(e,not rev) for e,rev in reversed(lower)]
     if np.linalg.norm(_point(lower[0],0)-bottom0)>tol or np.linalg.norm(_point(lower[-1],1)-bottom1)>tol:
         fail('LOWER_CHAIN_ORDER','Lower native chain does not connect the opposite side endpoints.')
+    # Pure numerical callers may explicitly lack native trim evidence. Native
+    # capture and fan preview independently require complete validated evidence.
+    # Partial or contradictory capture is never silently treated as missing.
+    if any('owner_side' in edge for edge in edges):
+        side_edges=[cycle[side0][0],cycle[side1][0]]
+        maps={role:_source_side_map(edge,natural[index],top,tol)
+              for role,edge,index,top in zip(('side0','side1'),side_edges,(side0,side1),(top0,top1))}
+        roles=dict(upper=upper,lower=lower)
+        roles.update({role:[(edge,bool(maps[role]['edge_parameter_from_chart_v'][0]<0.))]
+                      for role,edge in zip(('side0','side1'),side_edges)})
+        try:source_boundaries=build_source_boundaries(roles,tol,Curve,Surface,maps,cancelled)
+        except BoundaryEvidenceError as error:fail('NATIVE_BOUNDARY_EVIDENCE',str(error))
+    else:
+        source_boundaries=dict(schema='native-boundaries-v1',complete=False,status='missing',
+                               source_edge_count=len(edges),roles={},missing_source_keys=sorted(_key(e) for e in edges))
     origin=(top0+top1)/2;direction=unit(top1-top0);normal=unit(plane[1]);bottom_mid=(bottom0+bottom1)/2
     if normal@(bottom_mid-origin)<0:normal=-normal
     if abs(normal@direction)>1e-7:fail('FRAME_NOT_ORTHOGONAL','Upper plane and cross-width direction disagree.')
@@ -480,9 +634,8 @@ def build_spec(edges,tolerance,angle_tolerance=1e-3,cancelled=None):
         if np.max(np.linalg.norm(np.cross(p-bottom_mid,direction),axis=1))>tol:
             fail('LOWER_NOT_CROSS_WIDTH','The ruled-end native chain must be straight across width.')
     half=min(abs((bottom0-origin)@direction),abs((bottom1-origin)@direction))
-    linear_upper=[Curve(e['curve']) for e,_ in upper if Curve(e['curve']).linear(tol)]
-    if not linear_upper:fail('UPPER_CENTRAL_LINE','No central straight upper source run.')
-    half=min(half,max(abs((c(t)-origin)@direction) for c in linear_upper for t in c.domain))
+    upper_half,line_origin,straight_threshold=_central_upper_run(upper,origin,direction,tol,cancelled)
+    half=min(half,upper_half)
     if half<=tol*10:fail('TOO_SMALL_OPENING','No bounded interior width remains.')
     # Declared dimensionless design density and shoulder allocation, never source dimensions.
     levels=np.linspace(-.85*half,.85*half,5)
@@ -529,13 +682,14 @@ def build_spec(edges,tolerance,angle_tolerance=1e-3,cancelled=None):
     handles=_fair_handles(*(np.array(center[x]) for x in ('p0','p1','t0','t1','k0','k1')),normal,depth,cancelled)
     for p in profiles:
         p.update(speed0=float(handles[0]),speed1=float(handles[1]),accel0=float(handles[2]),accel1=float(handles[3]))
-    upper_paths=[_parameterize_upper(_path_to(upper,*anchors[0][:2],True),tol),_parameterize_upper(_path_to(upper,*anchors[-1][:2],False),tol)]
+    upper_paths=[_parameterize_upper(_path_to(upper,*anchors[0][:2],True),tol,direction,line_origin,straight_threshold,cancelled),_parameterize_upper(_path_to(upper,*anchors[-1][:2],False),tol,direction,line_origin,straight_threshold,cancelled)]
     scale=float(np.linalg.norm(bottom_mid-origin))
-    return dict(side_surfaces=[left,right],profiles=profiles,upper_paths=upper_paths,
+    return dict(side_surfaces=[left,right],profiles=profiles,upper_paths=upper_paths,source_boundaries=source_boundaries,
                 upper_plane_normal=normal.tolist(),transverse_direction=direction.tolist(),
                 active_v_fraction=[.2,.9],absolute_tolerance=tol,tolerance=tol,angle_tolerance=float(angle_tolerance),angle_tolerance_degrees=float(np.degrees(angle_tolerance)),
                 source_cross_sign=[-1.,-1.],length_scale=scale,
                 extraction_report=dict(family='mirrored_polynomial_side_charts_planar_upper_ruled_lower',source_edge_count=len(edges),
                     lower_all_edge_shape_operator_residual=lower_operator_error,lower_all_edge_tangent_residual=lower_tangent_error,lower_all_edge_curvature_residual=lower_jet_error,mirror_control_residual=mirror_error,upper_mirror_control_bound=upper_mirror_error,original_edge_coverage=len(edges),source_modified=False,
                     profile_count=5,station_count=9,profile_half_width_fraction=.85,shoulder_round_parameter_fraction=.2,
+                    upper_straight_coefficient_tolerance=straight_threshold,upper_span_policy='exact_homogeneous_native_spans_contiguous_centered_run',
                     partial_parent_continuity=True,exact_rational_upper=True))
