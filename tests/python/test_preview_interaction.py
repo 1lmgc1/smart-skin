@@ -1,11 +1,13 @@
 """Headless interaction/callback tests; native Rhino UI execution is NOT VERIFIED."""
 import ast
+import copy
 from pathlib import Path
 from types import SimpleNamespace as NS
 import unittest
 from unittest import mock
 
 from test_selected_handle_state import preview as p, catalog, proven_result
+from attachment_proof_fixtures import source_model, mock_verify_atlas
 
 
 class Curve(str):
@@ -78,7 +80,46 @@ class NativePickTests(unittest.TestCase):
                                       [{'id': 'x', 'indices': [0]}], {}, lambda: False)
 
 
+class GuideSelectorTests(unittest.TestCase):
+    def setUp(self):
+        self.edits = p.HandleEditState(catalog(), True)
+        self.groups = [{'id': 'boundary:0', 'label': 'Upper attachment'},
+                       {'id': 'row:0', 'label': 'U row 1'}, {'id': 'profile:0', 'label': 'V profile 1'}]
+
+    def test_initial_default_is_first_editable_catalogue_guide(self):
+        labels, index = p.guide_selector_choices(self.groups, self.edits)
+        self.assertEqual(index, 1)
+        self.assertEqual(labels[0], 'Upper attachment (read-only)')
+        self.assertEqual(labels[1], 'U row 1')
+
+    def test_explicit_structural_selection_is_preserved_for_inspection(self):
+        self.edits.select_guide('boundary:0')
+        labels, index = p.guide_selector_choices(self.groups, self.edits)
+        self.assertEqual(index, 0)
+        self.assertIn('read-only', labels[0])
+
+    def test_default_skips_locked_handle_but_preserves_explicit_locked_selection(self):
+        self.edits.handles['u-interior']['locked_reason'] = 'No supported motion.'
+        self.assertEqual(p.guide_selector_choices(self.groups, self.edits)[1], 2)
+        self.edits.select_guide('row:0')
+        self.assertEqual(p.guide_selector_choices(self.groups, self.edits)[1], 1)
+
+    def test_empty_and_removed_selections_have_bounded_fallback(self):
+        self.assertEqual(p.guide_selector_choices([], self.edits), ([], -1))
+        self.edits.select_guide('removed')
+        self.assertEqual(p.guide_selector_choices(self.groups, self.edits)[1], 1)
+
+
 class NativeConfirmationTests(unittest.TestCase):
+    def test_consumed_pick_during_getter_cannot_become_confirmation_but_later_enter_can(self):
+        state, screen = p.PreviewState(), p.NativeScreenState({})
+        selection = NS(selection_generation=0)
+        def pick_then_nothing():
+            selection.selection_generation += 1
+            return 'Nothing'
+        self.assertFalse(p.get_preview_decision(NS(Get=pick_then_nothing), state, screen, selection)[1])
+        self.assertTrue(p.get_preview_decision(NS(Get=lambda: 'Nothing'), state, screen, selection)[1])
+
     def test_timer_rebuild_during_getter_cannot_accept_newly_displayed_result(self):
         state = p.PreviewState()
         state.complete(state.begin(), True)
@@ -134,11 +175,16 @@ class SessionPickTests(unittest.TestCase):
         self.session = Session.__new__(Session)
         s = self.session
         s.disposed = False
+        s.edit_events_received = 0
+        s.pending_edit_diagnostic = None
+        s.checking_retry_sources = False
+        s.selection_generation = 0
         s.reset_work_counters()
         s.state = p.PreviewState()
         s.state.complete(s.state.begin(), True)
         s.attachment_ready = True
         s.native_screen = p.NativeScreenState({})
+        s.native_screen.context = NS(check_live=mock.Mock())
         s.native_screen.receipt = object()
         s.edits = p.HandleEditState(catalog(), True)
         s.valid_edit_token = s.edits.snapshot(0)
@@ -163,6 +209,7 @@ class SessionPickTests(unittest.TestCase):
         self.assertEqual(self.session.guide_selector.SelectedIndex, 0)
         self.assertEqual(self.session.edits.values, before)
         self.assertEqual(self.session.state.revision, 0)
+        self.assertEqual(self.session.selection_generation, 1)
         self.assertTrue(self.picker.disposed)
         self.event.Cancel = False
         self.mouse.OnMouseUp(self.event)
@@ -180,6 +227,41 @@ class SessionPickTests(unittest.TestCase):
         self.mouse.OnMouseDown(self.event)
         self.assertFalse(self.event.Cancel)
         self.assertEqual(self.picker.calls, [])
+
+    def test_actual_pick_callback_during_getter_drops_conditional_nothing_result(self):
+        def get():
+            self.mouse.OnMouseDown(self.event)
+            self.assertTrue(self.event.Cancel)
+            return 'Nothing'
+        result, current = p.get_preview_decision(NS(Get=get), self.session.state,
+                                                self.session.native_screen, self.session)
+        self.assertEqual(result, 'Nothing')
+        self.assertFalse(current)
+        self.assertTrue(p.get_preview_decision(NS(Get=lambda: 'Nothing'), self.session.state,
+                                               self.session.native_screen, self.session)[1])
+
+    def test_consumed_mouse_up_in_next_getter_cannot_confirm_either(self):
+        self.mouse.OnMouseDown(self.event)
+        self.event.Cancel = False
+        def up_then_nothing():
+            self.mouse.OnMouseUp(self.event)
+            self.assertTrue(self.event.Cancel)
+            return 'Nothing'
+        self.assertFalse(p.get_preview_decision(NS(Get=up_then_nothing), self.session.state,
+                                                self.session.native_screen, self.session)[1])
+        self.assertTrue(p.get_preview_decision(NS(Get=lambda: 'Nothing'), self.session.state,
+                                               self.session.native_screen, self.session)[1])
+
+    def test_pick_display_failure_still_revokes_same_getter_confirmation(self):
+        self.session.update_selection_display = mock.Mock(side_effect=RuntimeError('Synthetic redraw failure.'))
+        def get():
+            self.mouse.OnMouseDown(self.event)
+            return 'Nothing'
+        self.assertFalse(p.get_preview_decision(NS(Get=get), self.session.state,
+                                                self.session.native_screen, self.session)[1])
+        self.assertFalse(self.event.Cancel)
+        self.assertTrue(self.picker.disposed)
+        self.assertEqual(self.session.selection_generation, 1)
 
     def test_pending_build_cancel_closed_and_missing_receipt_never_pick(self):
         for key in ('pending', 'building', 'cancelled', 'closed'):
@@ -406,6 +488,194 @@ class SessionPickTests(unittest.TestCase):
         self.assertTrue(s.state.pending)
         self.assertIsNone(s.state.error)
         self.assertFalse(s.state.can_accept)
+
+    def configure_real_controls(self):
+        s = self.session
+        s.mouse = self.mouse
+        s.handle_selector = NS(DataStore=[], Enabled=False, SelectedIndex=-1)
+        s.slider = NS(Value=500, Enabled=False)
+        s.value = NS(Text='')
+        s.handle_note = NS(Text='')
+        s.limitation = NS(Text='')
+        s.attachment_reason = 'Synthetic checked attachment.'
+        s.refresh_handle_controls = type(s).refresh_handle_controls.__get__(s)
+        s.edits.select_guide('row:0')
+        s.refresh_handle_controls()
+        s.timer = NS(Stop=mock.Mock(), Start=mock.Mock())
+        s.prepared = NS()
+        s.set_stage = lambda name: setattr(s, 'stage_name', name)
+        return s
+
+    def reject_slider_edit(self):
+        s = self.configure_real_controls()
+        s.slider.Value = 750
+        s.on_change(None, None)
+        with mock.patch.dict(s.rebuild.__func__.__globals__,
+                             evaluate_preview_cycle=mock.Mock(side_effect=ValueError('Synthetic range rejection.'))):
+            s.on_tick(None, None)
+        self.assertEqual(s.edits.values['u-interior'], 0.)
+        self.assertIsNone(s.native_screen.receipt)
+        self.assertTrue(s.slider.Enabled, 'A rejected request must not lock out the next smaller edit.')
+        self.assertFalse(s.mouse.Enabled, 'Receipt-less viewport picking stays disabled.')
+        return s
+
+    def test_rejected_edit_can_request_smaller_value_then_show_new_freshly_screened_geometry(self):
+        s = self.reject_slider_edit()
+        self.capture.model = source_model()
+        received = []
+        def evaluate_edit(request, cancelled):
+            received.append(request)
+            token = p.HandleEditToken(request['revision'], request['basis_id'], tuple(sorted(request['values'].items())))
+            result = proven_result(token)
+            result['guides'] = [{'guide_id': 'row:0', 'varying_axis': 'u'},
+                                {'guide_id': 'profile:0', 'varying_axis': 'v'}]
+            return result
+        s.prepared.evaluate_edit = evaluate_edit
+        self.doc.Objects = NS(AddBrep=mock.Mock(side_effect=AssertionError('Recovery must not add objects.')),
+                              AddCurve=mock.Mock(side_effect=AssertionError('Recovery must not add objects.')))
+        new_breps, new_guides = [object()], [object(), object()]
+        fresh_receipt = object()
+        def screen(*args, **kwargs):
+            self.assertAlmostEqual(kwargs['request']['values']['u-interior'], .2)
+            s.native_screen.receipt = fresh_receipt
+        s.native_screen.screen = mock.Mock(side_effect=screen)
+        def replace(breps, guides):
+            s.conduit.breps, s.conduit.guides = breps, guides
+        s.conduit.replace = mock.Mock(side_effect=replace)
+        s.rescreen_restored_preview = mock.Mock(side_effect=AssertionError('No automatic restored rescreen.'))
+        s.slider.Value = 600
+        s.on_change(None, None)
+        self.assertAlmostEqual(s.edits.values['u-interior'], .2)
+        s.native_screen.context.check_live.assert_called_once()
+        self.assertTrue(s.state.pending)
+        self.assertFalse(s.state.can_accept)
+        with mock.patch.dict(s.rebuild.__func__.__globals__,
+                             make_native_geometry=mock.Mock(return_value=(new_breps, new_guides, object())),
+                             _verify_atlas_separation=mock_verify_atlas):
+            s.on_tick(None, None)
+        self.assertEqual(len(received), 1)
+        self.assertAlmostEqual(received[0]['values']['u-interior'], .2)
+        self.assertIs(s.native_screen.receipt, fresh_receipt)
+        s.native_screen.screen.assert_called_once()
+        s.conduit.replace.assert_called_once_with(new_breps, new_guides)
+        self.assertIs(s.conduit.breps, new_breps)
+        self.assertAlmostEqual(s.conduit.handle_display[1][2], 1.2)
+        self.assertTrue(s.state.can_accept)
+        self.assertTrue(s.slider.Enabled)
+        self.assertFalse(getattr(s, 'accept_requested', False))
+        self.doc.Objects.AddBrep.assert_not_called()
+        self.doc.Objects.AddCurve.assert_not_called()
+        s.rescreen_restored_preview.assert_not_called()
+        self.assertTrue(any('EDIT_REQUEST' in line and 'value=0.2' in line for line in self.logs))
+        self.assertTrue(any('P08E1_READY' in line and 'nonzero_handles=1' in line for line in self.logs))
+
+    def test_source_or_tolerance_change_blocks_first_restored_retry_before_queuing(self):
+        s = self.reject_slider_edit()
+        starts = s.timer.Start.call_count
+        s.native_screen.context.check_live.side_effect = RuntimeError('Captured tolerance changed.')
+        s.slider.Value = 600
+        s.on_change(None, None)
+        self.assertFalse(s.slider.Enabled)
+        self.assertFalse(s.state.can_accept)
+        self.assertFalse(s.state.pending)
+        self.assertEqual(s.edits.values['u-interior'], 0.)
+        self.assertEqual(s.timer.Start.call_count, starts)
+        self.assertIsNone(s.native_screen.receipt)
+        self.assertFalse(s.prepare_acceptance())
+        self.assertIn('proof could not be revalidated', s.status.Text)
+        self.assertIn('RuntimeError', s.status.Text)
+        self.assertFalse(s.checking_retry_sources)
+
+    def test_native_proof_failure_is_not_reported_as_proven_source_mutation(self):
+        s = self.reject_slider_edit()
+        s.native_screen.context.check_live.side_effect = OSError('Sensitive native detail is not for logs.')
+        s.slider.Value = 600
+        s.on_change(None, None)
+        self.assertIn('proof could not be revalidated', s.status.Text)
+        self.assertIn('OSError', s.status.Text)
+        self.assertNotIn('changed', s.status.Text)
+        self.assertFalse(any('Sensitive native detail' in line for line in self.logs))
+
+    def test_reentrant_slider_event_during_retry_source_check_queues_latest_value_once(self):
+        s = self.reject_slider_edit()
+        before = s.edit_events_received
+        def nested_change():
+            s.slider.Value = 610
+            s.on_change(None, None)
+        s.native_screen.context.check_live.side_effect = nested_change
+        s.slider.Value = 600
+        s.on_change(None, None)
+        s.native_screen.context.check_live.assert_called_once()
+        self.assertAlmostEqual(s.edits.values['u-interior'], .22)
+        self.assertEqual(s.edit_events_received, before + 1)
+        self.assertFalse(s.checking_retry_sources)
+
+    def test_cancel_during_retry_source_check_cannot_queue_a_request(self):
+        s = self.reject_slider_edit()
+        before = s.edit_events_received
+        s.native_screen.context.check_live.side_effect = s.state.cancel
+        s.slider.Value = 600
+        s.on_change(None, None)
+        self.assertEqual(s.edits.values['u-interior'], 0.)
+        self.assertEqual(s.edit_events_received, before)
+        self.assertFalse(s.state.pending)
+
+    def test_initial_failure_never_enables_editing_without_a_displayed_valid_result(self):
+        s = self.configure_real_controls()
+        s.valid_edit_token = None
+        s.output = None
+        s.native_screen.invalidate()
+        s.refresh_handle_controls()
+        self.assertFalse(s.slider.Enabled)
+        self.assertFalse(s.may_request_edit())
+        previous = dict(s.edits.values)
+        s.slider.Enabled = True
+        s.slider.Value = 800
+        s.on_change(None, None)
+        self.assertEqual(s.edits.values, previous)
+        self.assertEqual(s.edit_events_received, 0)
+
+    def test_scalar_summary_distinguishes_neutral_from_nonzero_without_geometry_or_basis_data(self):
+        zero = p.HandleEditToken(0, 'not-for-logs', (('profile:2:lift', 0.),))
+        moved = p.HandleEditToken(3, 'not-for-logs', (('profile:2:lift', -.125),))
+        self.assertIn('nonzero_handles=0', p.edit_value_summary(zero))
+        self.assertIn('request_revision=3', p.edit_value_summary(moved))
+        self.assertIn('max_abs_value=0.125', p.edit_value_summary(moved))
+        self.assertNotIn('not-for-logs', p.edit_value_summary(moved))
+
+    def test_input_diagnostic_exists_before_timer_and_coalesces_drag_events(self):
+        s = self.configure_real_controls()
+        s.slider.Value = 600
+        s.on_change(None, None)
+        s.slider.Value = 650
+        s.on_change(None, None)
+        lines = [line for line in self.logs if 'EDIT_INPUT' in line]
+        self.assertEqual(len(lines), 1)
+        self.assertIn('value=0.2', lines[0])
+        self.assertFalse(any('EDIT_REQUEST' in line for line in self.logs), 'Timer has not fired yet.')
+        self.assertAlmostEqual(s.pending_edit_diagnostic[2], .3)
+        self.assertEqual(s.edit_events_received, 2)
+
+    def test_default_profile_uses_unlocked_shoulder_but_preserves_deliberate_locked_handle(self):
+        s = self.configure_real_controls()
+        data = catalog()
+        normal = data['handles'][1]
+        shoulder = copy.deepcopy(normal)
+        normal['locked_reason'] = 'Normal lift unavailable.'
+        shoulder.update(id='v-shoulder', label='Upper shoulder', mirror_handle_id='v-shoulder')
+        data['handles'] = [normal, shoulder]
+        s.edits = p.HandleEditState(data, True)
+        s.valid_edit_token = s.edits.snapshot(0)
+        s.output = proven_result(s.valid_edit_token)
+        s.edits.accept(s.valid_edit_token, s.output)
+        groups = [{'id': 'profile:0', 'label': 'V profile 1', 'indices': []}]
+        s.refresh_guide_choices(groups)
+        self.assertEqual(s.edits.selected_handle, 'v-shoulder')
+        self.assertTrue(s.slider.Enabled)
+        s.edits.select_handle('v-interior')
+        s.refresh_guide_choices(groups)
+        self.assertEqual(s.edits.selected_handle, 'v-interior')
+        self.assertFalse(s.slider.Enabled)
 
 
 if __name__ == '__main__':

@@ -1,8 +1,8 @@
-# Smart Skin — P08E1F6 experimental field candidate
+# Smart Skin — P08E1F7 experimental field candidate
 
-Rhino8.21+ / Windows. Version **0.0.20-p08e1f6**.
+Rhino8.21+ / Windows. Version **0.0.21-p08e1f7**.
 
-F6 repairs a false native-screen stale fingerprint caused by read-only Brep cache queries, reuses the exact validated baseline for the initial neutral handle request, and throttles UI event pumping. See [native cache and latency repair](docs/P08E1F6_NATIVE_CACHE_LATENCY.md). F4 capture, F5 selection, construction and physical acceptance tolerances are retained.
+F7 repairs slider recovery after a rejected edit and logs requested, restored and applied handle values. See [rejected-edit recovery](docs/P08E1F7_SLIDER_RECOVERY.md). F6 cache/latency fixes, construction, handle ranges and physical acceptance tolerances are retained.
 
 This experimental field candidate repairs compound-edge recognition and constructs a boundary-preserving native skin with selectable U/V guide handles. Original source objects remain unchanged. Upper source corners may be hard at the two explicitly identified vertices; finite source intervals and generated joins receive no continuity exemption. Whole-skin numerical construction, selected-handle regressions and the bounded cap-cap screen pass. The actual Rhino owner-screen and interactive workflow remain a field-test boundary. Delivery requires successful exact-SHA Windows CI and its unchanged verified install ZIP.
 

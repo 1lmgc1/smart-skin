@@ -93,3 +93,10 @@ dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --
 - Initial neutral U/V handoff may reuse only the sealed, fully validated baseline descriptors verbatim, with fresh source/request/position bindings and a fresh native-owner screen. Non-neutral edits retain full checks.
 - Throttle native event pumping while checking cancellation, revision and deadlines at every numerical checkpoint. Report measured stage/pump timing; headless timing is not Rhino performance verification.
 - Keep physical tolerances, source geometry, upper-only hard-point scope, installer algorithms and exact-SHA Windows CI unchanged. The openNURBS regression package is CI-only, never a Rhino runtime dependency.
+
+## P08E1F7 rejected-edit recovery
+
+- Version `0.0.21-p08e1f7` separates permission to request another slider edit from permission to accept the current native preview. A revoked receipt must still block acceptance and native picking; it must not permanently disable retries from a valid restored numerical baseline.
+- Before the first restored retry, recheck the captured source/tolerance state; every resulting edit still runs the complete numerical and native checks. Do not revive receipts, auto-accept, or introduce retry loops.
+- Log bounded generated handle IDs, requested/applied/restored values and revisions so field evidence distinguishes a missed event, rejected edit and accepted neutral state. Preserve the constructor, ranges, source geometry and physical gates.
+- A consumed left guide/handle pick must invalidate the current native confirmation token; a distinct later Enter/Space/right-click remains valid. Test conditional native input propagation without claiming it occurred in the field.

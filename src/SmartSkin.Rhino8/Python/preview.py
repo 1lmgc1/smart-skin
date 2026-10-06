@@ -573,6 +573,21 @@ def group_uv_guides(descriptors):
     return sorted(groups.values(), key=lambda item: (item["varying_axis"], item["id"]))
 
 
+def guide_selector_choices(groups, edits):
+    """Default to an editable guide; retain deliberate structural inspection."""
+    catalogued = {item["guide_id"] for item in edits.handles.values()}
+    editable = {item["guide_id"] for item in edits.handles.values()
+                if not item.get("locked_reason")
+                and not edits.handles[item["mirror_handle_id"]].get("locked_reason")}
+    identifiers = [group["id"] for group in groups]
+    labels = [group["label"] + (" (read-only)" if group["id"] not in catalogued else "") for group in groups]
+    if edits.selected_guide in identifiers:
+        index = identifiers.index(edits.selected_guide)
+    else:
+        index = next((i for i, key in enumerate(identifiers) if key in editable), 0 if groups else -1)
+    return labels, index
+
+
 def evaluate_preview_request(prepared, edits, revision, cancelled):
     """A selected edit has its own API; failure cannot become a global edit."""
     token = edits.snapshot(revision) if edits.enabled else None
@@ -643,18 +658,28 @@ def preview_command_prompt(state, editable=False, native_ready=False):
         return "Smart Skin BLOCKED: see the window and command history for the failed stage; Esc closes"
     if state.can_accept:
         if not native_ready:
-            return "Smart Skin restored preview: Enter rechecks native separation before acceptance; controls disabled; Esc cancels"
+            return "Smart Skin restored preview: adjust its slider to retry; Enter rechecks and accepts the restored value; Esc cancels"
         return ("Smart Skin READY: click a preview guide/handle or select it in the window; adjust its slider; "
                 "Enter/Space/right-click adds; Esc cancels" if editable else
                 "Smart Skin baseline READY; local handles unavailable; Enter/Space/right-click adds; Esc cancels")
     return "Smart Skin has no acceptable preview; Esc closes"
 
 
-def get_preview_decision(decision, state, native_screen):
-    """A getter may pump a timer rebuild before returning an old Enter click."""
-    before = (state.revision, native_screen.generation)
+def edit_value_summary(token):
+    if token is None:
+        return "request_revision=none | nonzero_handles=0 | max_abs_value=0"
+    values = [float(value) for _, value in token.values]
+    return "request_revision={0} | nonzero_handles={1} | max_abs_value={2:.6g}".format(
+        int(token.revision), sum(value != 0.0 for value in values), max([0.0] + [abs(value) for value in values]))
+
+
+def get_preview_decision(decision, state, native_screen, selection=None):
+    """A getter may pump a rebuild or consumed viewport pick before returning."""
+    def current():
+        return state.revision, native_screen.generation, (selection.selection_generation if selection is not None else 0)
+    before = current()
     result = decision.Get()
-    return result, before == (state.revision, native_screen.generation)
+    return result, before == current()
 
 
 def pick_native_preview(picker, guides, groups, handle_points, cancelled):
@@ -1236,6 +1261,7 @@ def run(doc, capture, kernel):
                 viewport = self.consumed_viewport
                 self.consumed_viewport = None
                 if viewport is not None and event.View is not None and event.View.ActiveViewport.Id == viewport:
+                    self.session.selection_generation += 1
                     event.Cancel = True
             except Exception:
                 self.consumed_viewport = None
@@ -1257,6 +1283,10 @@ def run(doc, capture, kernel):
             self.handle_ids = []
             self.output = None
             self.accept_requested = False
+            self.edit_events_received = 0
+            self.pending_edit_diagnostic = None
+            self.checking_retry_sources = False
+            self.selection_generation = 0
             self.closing_for_command = False
             self.suppress_changes = False
             self.disposed = False
@@ -1453,10 +1483,42 @@ def run(doc, capture, kernel):
                     self.accept_requested = True
 
         def on_change(self, sender, event):
-            if self.suppress_changes or self.disposed or self.state.cancelled or self.state.closed:
+            if (self.suppress_changes or self.disposed or self.state.cancelled or self.state.closed
+                    or self.checking_retry_sources):
                 return
-            if self.edits is None or not self.edits.enabled or not self.slider.Enabled:
+            if not self.may_request_edit() or not self.slider.Enabled:
                 return
+            was_idle = not self.state.pending and not self.state.building
+            if self.native_screen.receipt is None and not self.state.pending and not self.state.building:
+                # A rejected edit revoked native acceptance authority. A new
+                # request is still allowed, but first prove that its original
+                # captured sources and document tolerances remain current.
+                retry_context = self.native_screen.context
+                retry_revision = self.state.revision
+                self.checking_retry_sources = True
+                try:
+                    retry_context.check_live()
+                except Exception as error:
+                    if self.disposed or self.state.closed or self.state.cancelled:
+                        return
+                    self.native_screen.invalidate()
+                    self.mouse.close()
+                    self.state.error = "Source/tolerance proof could not be revalidated."
+                    self.attachment_ready = False
+                    self.attachment_reason = self.state.error
+                    self.refresh_handle_controls()
+                    detail = type(error).__name__[:80]
+                    if getattr(error, "code", None) in ("OWNER_SCREEN_STALE", "OWNER_SCREEN_NATIVE_FAILURE",
+                                                         "OWNER_SCREEN_BINDING", "OWNER_SCREEN_BUDGET"):
+                        detail += ": " + " ".join(str(error).split())[:280]
+                    self.status.Text = "BLOCKED: " + self.state.error + "\n" + detail
+                    Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_EDIT_BLOCKED | reason=source_proof_unavailable | " + detail)
+                    return
+                finally:
+                    self.checking_retry_sources = False
+                if (self.disposed or self.state.closed or self.state.cancelled
+                        or self.state.revision != retry_revision or self.native_screen.context is not retry_context):
+                    return
             self.accept_requested = False
             self.native_screen.invalidate()
             self.mouse.close()
@@ -1466,10 +1528,27 @@ def run(doc, capture, kernel):
             # Reuse the existing revision/cancellation machinery. The scalar
             # remains the fixed baseline; it is NEVER the selected edit input.
             self.state.request(1.0)
+            self.edit_events_received += 1
+            self.pending_edit_diagnostic = (self.state.revision, self.edits.selected_handle, value,
+                                            item["minimum"], item["maximum"])
             self.value.Text = _number(value)
             self.timer.Stop()
             self.status.Text = "UPDATING: waiting for the selected handle edit. Acceptance is disabled."
             self.timer.Start()
+            if was_idle:
+                _safe_cleanup(lambda: Rhino.RhinoApp.WriteLine(
+                    "SMARTSKIN_P08E1_EDIT_INPUT | revision={0} | handle={1} | value={2:.6g} | events_received={3}".format(
+                        self.state.revision, self.edits.selected_handle, value, self.edit_events_received)))
+
+        def may_request_edit(self):
+            # Requesting another bounded numerical result is separate from
+            # accepting or picking the currently displayed native preview.
+            return bool(not self.disposed and not self.state.closed and not self.state.cancelled
+                        and self.state.error is None and self.attachment_ready
+                        and self.edits is not None and self.edits.enabled
+                        and self.valid_edit_token is not None and self.output is not None
+                        and self.edits.last_valid_values is not None and self.edits.last_valid_positions is not None
+                        and self.native_screen.context is not None)
 
         def refresh_handle_controls(self):
             previous_suppression = self.suppress_changes
@@ -1482,9 +1561,7 @@ def run(doc, capture, kernel):
                 item = self.edits.handles.get(self.edits.selected_handle) if self.edits is not None else None
                 partner = self.edits.handles[item["mirror_handle_id"]] if item is not None else None
                 locked_reason = (item.get("locked_reason") or partner.get("locked_reason")) if item is not None else None
-                self.slider.Enabled = bool(self.edits is not None and self.edits.enabled and self.attachment_ready
-                                           and self.native_screen.receipt is not None
-                                           and item and not locked_reason)
+                self.slider.Enabled = bool(self.may_request_edit() and item and not locked_reason)
                 self.mouse.Enabled = bool(self.state.can_accept and self.attachment_ready
                                           and self.native_screen.receipt is not None and self.edits is not None
                                           and self.edits.enabled and self.valid_edit_token is not None)
@@ -1507,13 +1584,19 @@ def run(doc, capture, kernel):
             previous_suppression = self.suppress_changes
             self.suppress_changes = True
             try:
-                self.guide_selector.DataStore = [item["label"] for item in groups]
-                self.guide_selector.Enabled = bool(groups)
                 identifiers = [item["id"] for item in groups]
-                current = self.edits.selected_guide
-                index = identifiers.index(current) if current in identifiers else (0 if groups else -1)
+                automatic = self.edits.selected_guide not in identifiers
+                labels, index = guide_selector_choices(groups, self.edits)
+                self.guide_selector.DataStore = labels
+                self.guide_selector.Enabled = bool(groups)
                 self.guide_selector.SelectedIndex = index
-                self.edits.select_guide(identifiers[index] if index >= 0 else None)
+                handles = self.edits.select_guide(identifiers[index] if index >= 0 else None)
+                if automatic:
+                    for key in handles:
+                        item = self.edits.handles[key]
+                        if not item.get("locked_reason") and not self.edits.handles[item["mirror_handle_id"]].get("locked_reason"):
+                            self.edits.select_handle(key)
+                            break
                 self.refresh_handle_controls()
             finally:
                 self.suppress_changes = previous_suppression
@@ -1566,6 +1649,9 @@ def run(doc, capture, kernel):
                 picked = pick_native_preview(picker, self.conduit.guides, self.guide_groups, points, stale)
                 if picked is None or stale():
                     return False
+                # This input must not become a confirmation even if a later
+                # dropdown or redraw operation fails after changing selection.
+                self.selection_generation += 1
                 kind, identifier = picked
                 guide_id = self.edits.handles[identifier]["guide_id"] if kind == "handle" else identifier
                 self.edits.select_guide(guide_id)
@@ -1637,6 +1723,11 @@ def run(doc, capture, kernel):
                 # another expensive fan rebuild finishing an obsolete value.
                 return self.cancelled() or self.state.superseded(token)
             try:
+                requested = self.pending_edit_diagnostic
+                if requested is not None and requested[0] == token[0]:
+                    Rhino.RhinoApp.WriteLine(("SMARTSKIN_P08E1_EDIT_REQUEST | revision={0} | handle={1} | value={2:.6g} "
+                                             "| minimum={3:.6g} | maximum={4:.6g} | events_received={5}").format(
+                                                 *requested, self.edit_events_received))
                 self.set_stage("PREPARING NATIVE NETWORK")
                 if self.prepared is None:
                     # Input mapping contains only owned generic numerical data.
@@ -1684,8 +1775,9 @@ def run(doc, capture, kernel):
                                             "READY" if self.attachment_ready else "INSPECTION ONLY", mode,
                                             self.attachment_reason, len(self.conduit.breps), len(self.conduit.guides),
                                             time.monotonic() - started, _metric_text(result))
-                    Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_READY | guides={0} | handles={1} | elapsed={2:.1f}s".format(
-                        len(groups), len(self.edits.handles), time.monotonic() - started))
+                    Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_READY | guides={0} | handles={1} | elapsed={2:.1f}s | {3} | events_received={4}".format(
+                        len(groups), len(self.edits.handles), time.monotonic() - started,
+                        edit_value_summary(edit_token), self.edit_events_received))
                 elif not self.state.cancelled:
                     self.native_screen.invalidate()
                     self.status.Text = "UPDATING: a newer handle setting is pending."
@@ -1709,13 +1801,14 @@ def run(doc, capture, kernel):
                         self.refresh_handle_controls()
                         self.update_selection_display()
                         self.status.Text = ("REJECTED selected handle edit: {0}\n"
-                                            "Handle values and preview restored. A new Enter first rebuilds exact native copies "
-                                            "and obtains a fresh native separation receipt.\n{1}").format(reason, _metric_text(self.output))
+                                            "Handle values and preview restored. Try another slider value. "
+                                            "Enter rechecks native separation and accepts the restored value.\n{1}").format(reason, _metric_text(self.output))
                     else:
                         self.status.Text = "BLOCKED: " + reason + "\nNo current result can be accepted."
                     if failed_current:
-                        Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_{0} | stage={1} | elapsed={2:.1f}s | {3}".format(
-                            failure_label, self.stage_name, time.monotonic() - started, " ".join(reason.split())[:700]))
+                        Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_{0} | stage={1} | elapsed={2:.1f}s | requested_revision={3} | {4} | {5}".format(
+                            failure_label, self.stage_name, time.monotonic() - started, token[0],
+                            edit_value_summary(self.valid_edit_token), " ".join(reason.split())[:700]))
             finally:
                 self.deadline = None
                 _safe_cleanup(lambda: Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_WORK | " + self.work_diagnostic()))
@@ -1871,7 +1964,7 @@ def run(doc, capture, kernel):
                 session.accept_requested = False
             decision.SetCommandPrompt(preview_command_prompt(session.state, bool(session.edits and session.edits.enabled),
                                                              session.native_screen.receipt is not None))
-            result, current_confirmation = get_preview_decision(decision, session.state, session.native_screen)
+            result, current_confirmation = get_preview_decision(decision, session.state, session.native_screen, session)
             if session.state.cancelled or not session.form.Visible:
                 break
             if result == Rhino.Input.GetResult.Timeout:
@@ -1892,8 +1985,9 @@ def run(doc, capture, kernel):
                 edit_state=session.edits if session.valid_edit_token is not None else None,
                 cancelled=lambda: session.disposed or session.state.closed or session.state.cancelled,
                 native_screen=session.native_screen)
-            Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1 ACCEPTED_SELECTED_UV_PROTOTYPE | skin={0} | guides={1} | mode={2} | sources=unchanged | full_G2=NOT_VERIFIED".format(
-                skin_count, guide_count, "SELECTED_HANDLE" if session.valid_edit_token is not None else "BASELINE"))
+            Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1 ACCEPTED_SELECTED_UV_PROTOTYPE | skin={0} | guides={1} | mode={2} | sources=unchanged | full_G2=NOT_VERIFIED | {3} | events_received={4}".format(
+                skin_count, guide_count, "SELECTED_HANDLE" if session.valid_edit_token is not None else "BASELINE",
+                edit_value_summary(session.valid_edit_token), session.edit_events_received))
             return True
         Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1 CANCELLED | added=0 | sources=unchanged")
         return False
