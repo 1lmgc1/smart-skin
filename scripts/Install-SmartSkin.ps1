@@ -75,7 +75,8 @@ try {
     $CanonicalSnapshot = @($Snapshot | Where-Object { (($_.path -split '\\')[0]) -ieq $script:SmartSkinGuid })
     Restore-RegistrySnapshot $RegistryBase $CanonicalSnapshot
     $CanonicalKey = Join-Path $RegistryBase $script:SmartSkinGuid
-    New-Item -Path $CanonicalKey -Force | Out-Null
+    # Registry New-Item -Force replaces an existing key; do not erase restored settings.
+    if (-not (Test-Path -LiteralPath $CanonicalKey)) { New-Item -Path $CanonicalKey -Force | Out-Null }
     New-ItemProperty -LiteralPath $CanonicalKey -Name 'Name' -PropertyType String -Value 'Smart Skin' -Force | Out-Null
     New-ItemProperty -LiteralPath $CanonicalKey -Name 'FileName' -PropertyType String -Value $DestinationRhp -Force | Out-Null
     Invoke-TestFailure $Context $TestFailAt 'AfterRegistryWrite'
