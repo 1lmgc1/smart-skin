@@ -21,6 +21,7 @@ MAX_PREVIEW_GUIDES = 128
 COLD_BUILD_SECONDS = 180.0
 CACHED_BUILD_SECONDS = 60.0
 NATIVE_SCREEN_SECONDS = 15.0
+VIEWPORT_PICK_SECONDS = 0.25
 
 
 def _native_owner_api():
@@ -573,6 +574,100 @@ def evaluate_preview_request(prepared, edits, revision, cancelled):
     return prepared.evaluate(1.0, cancelled=cancelled), None
 
 
+def evaluate_preview_cycle(prepared, edits, revision, cancelled, source_model, stage=None):
+    """Discover a lazily built handle basis after its checked baseline exists.
+
+    A catalog captured before the first evaluate() may be intentionally empty.
+    Never expose that later catalog over an unbound baseline: evaluate its real
+    neutral request so positions, geometry and edit proof share one request.
+    """
+    if edits is not None and edits.enabled:
+        result, token = evaluate_preview_request(prepared, edits, revision, cancelled)
+        return result, token, edits
+    if stage is not None:
+        stage("BASELINE GEOMETRY AND CHECKS")
+    result = prepared.evaluate(1.0, cancelled=cancelled)
+    for check in (geometry_commit_acceptance(result), attachment_acceptance(result, source_model)):
+        if not check[0]:
+            raise ValueError(check[1] + " " + str(result.get("reason", "")))
+    _verify_atlas_separation(result, source_model, None)
+    if cancelled():
+        raise RuntimeError("Preview preparation was cancelled or superseded.")
+    provider = getattr(prepared, "handle_edit_catalog", None)
+    refreshed = HandleEditState(provider() if callable(provider) else None,
+                                callable(getattr(prepared, "evaluate_edit", None)))
+    if not refreshed.enabled:
+        raise ValueError("Selected U/V handles are unavailable after baseline validation: " + refreshed.reason)
+    if stage is not None:
+        stage("NEUTRAL U/V HANDLE CHECKS")
+    result, token = evaluate_preview_request(prepared, refreshed, revision, cancelled)
+    return result, token, refreshed
+
+
+def preview_command_prompt(state, editable=False, native_ready=False):
+    if state.building or state.pending:
+        return "Smart Skin is building and checking; controls stay disabled until READY; Esc cancels"
+    if state.error:
+        return "Smart Skin BLOCKED: see the window and command history for the failed stage; Esc closes"
+    if state.can_accept:
+        if not native_ready:
+            return "Smart Skin restored preview: Enter rechecks native separation before acceptance; controls disabled; Esc cancels"
+        return ("Smart Skin READY: click a preview guide/handle or select it in the window; adjust its slider; "
+                "Enter/Space/right-click adds; Esc cancels" if editable else
+                "Smart Skin baseline READY; local handles unavailable; Enter/Space/right-click adds; Esc cancels")
+    return "Smart Skin has no acceptable preview; Esc closes"
+
+
+def get_preview_decision(decision, state, native_screen):
+    """A getter may pump a timer rebuild before returning an old Enter click."""
+    before = (state.revision, native_screen.generation)
+    result = decision.Get()
+    return result, before == (state.revision, native_screen.generation)
+
+
+def pick_native_preview(picker, guides, groups, handle_points, cancelled):
+    """Hit-test only displayed exact curves/markers; never document objects.
+
+    Rhino's native pick aperture and clipping planes decide hits. Point markers
+    take precedence over their incident guides; cursor distance then camera
+    depth resolves multiple hits. No partial scan may select a winner.
+    """
+    if len(guides) > MAX_PREVIEW_GUIDES or len(handle_points) > 128 or len(groups) > MAX_PREVIEW_GUIDES:
+        raise ValueError("Viewport picking exceeds its bounded preview count.")
+    curve_groups = {}
+    for group in groups:
+        for index in group["indices"]:
+            if type(index) is not int or not 0 <= index < len(guides) or index in curve_groups:
+                raise ValueError("The displayed guide-to-curve mapping is invalid.")
+            curve_groups[index] = group["id"]
+    candidates = []
+    def collect(kind, identifier, geometry, curve=False):
+        if cancelled():
+            raise RuntimeError("Viewport picking was cancelled, superseded or exceeded its time budget.")
+        values = picker.PickFrustumTest(geometry)
+        if len(values) != (4 if curve else 3):
+            raise RuntimeError("The native viewport pick returned an unsupported result.")
+        if values[0]:
+            if curve:
+                parameter = float(values[1])
+                if not math.isfinite(parameter) or not geometry.Domain.T0 <= parameter <= geometry.Domain.T1:
+                    raise RuntimeError("The native viewport pick returned a parameter outside the exact guide domain.")
+            depth, distance = float(values[-2]), float(values[-1])
+            if not math.isfinite(depth) or not math.isfinite(distance) or distance < 0:
+                raise RuntimeError("The native viewport pick returned an invalid distance or depth.")
+            candidates.append((0 if kind == "handle" else 1, distance, -depth, identifier, kind))
+    for identifier, point in handle_points.items():
+        collect("handle", identifier, point)
+    for index, identifier in curve_groups.items():
+        collect("guide", identifier, guides[index], curve=True)
+    if cancelled():
+        raise RuntimeError("Viewport picking was cancelled, superseded or exceeded its time budget.")
+    if not candidates:
+        return None
+    winner = min(candidates)
+    return winner[4], winner[3]
+
+
 class PreviewState:
     """Never accept an old preview under a newer visible handle setting."""
 
@@ -1032,6 +1127,7 @@ def run(doc, capture, kernel):
             self.breps, self.guides = [], []
             self.selected_guide_indices = set()
             self.handle_display = None
+            self.handle_points = {}
             self.material = Rhino.Display.DisplayMaterial(system_drawing.Color.FromArgb(65, 195, 215))
             self.material.Transparency = 0.35
 
@@ -1041,6 +1137,8 @@ def run(doc, capture, kernel):
             box = BoundingBox.Empty
             for item in self.breps + self.guides:
                 box.Union(item.GetBoundingBox(True))
+            for point in self.handle_points.values():
+                box.Union(Rhino.Geometry.Point3d(*point))
             if self.handle_display is not None:
                 for point in self.handle_display:
                     box.Union(Rhino.Geometry.Point3d(*point))
@@ -1057,6 +1155,9 @@ def run(doc, capture, kernel):
                 selected = index in self.selected_guide_indices
                 event.Display.DrawCurve(curve, system_drawing.Color.Yellow if selected else system_drawing.Color.Orange,
                                         4 if selected else 2)
+            for point in self.handle_points.values():
+                event.Display.DrawPoint(Rhino.Geometry.Point3d(*point), Rhino.Display.PointStyle.Simple,
+                                        4, system_drawing.Color.Orange)
             if self.handle_display is not None:
                 anchor, point = [Rhino.Geometry.Point3d(*value) for value in self.handle_display]
                 event.Display.DrawLine(anchor, point, system_drawing.Color.Yellow, 2)
@@ -1074,6 +1175,42 @@ def run(doc, capture, kernel):
             _safe_cleanup(lambda: setattr(self, "Enabled", False))
             _safe_cleanup(lambda: self.replace([], []))
             _safe_cleanup(self.material.Dispose)
+
+    class PreviewMouse(Rhino.UI.MouseCallback):
+        def __init__(self, session):
+            super().__init__()
+            self.session = session
+            self.consumed_viewport = None
+
+        def OnMouseDown(self, event):
+            try:
+                if (self.session.disposed or self.session.state.closed or self.session.state.cancelled
+                        or event.MouseButton != Rhino.UI.MouseButton.Left or event.CtrlKeyDown or event.ShiftKeyDown
+                        or event.Cancel):
+                    return
+                self.consumed_viewport = None
+                if self.session.pick_viewport(event):
+                    self.consumed_viewport = event.View.ActiveViewport.Id
+                    event.Cancel = True
+            except Exception:
+                # A queued native callback may outlive its view/control.
+                self.consumed_viewport = None
+
+        def OnMouseUp(self, event):
+            try:
+                if (self.session.disposed or self.session.state.closed or self.session.state.cancelled
+                        or event.MouseButton != Rhino.UI.MouseButton.Left):
+                    return
+                viewport = self.consumed_viewport
+                self.consumed_viewport = None
+                if viewport is not None and event.View is not None and event.View.ActiveViewport.Id == viewport:
+                    event.Cancel = True
+            except Exception:
+                self.consumed_viewport = None
+
+        def close(self):
+            self.Enabled = False
+            self.consumed_viewport = None
 
     class Session:
         def __init__(self):
@@ -1093,7 +1230,13 @@ def run(doc, capture, kernel):
             self.disposed = False
             self.deadline = None
             self.timed_out = False
+            self.stage_name = "PREPARING"
+            self.build_started = None
+            self.build_budget = None
+            self.progress_updated = 0.0
+            self.pumping_events = False
             self.conduit = Conduit()
+            self.mouse = PreviewMouse(self)
             self.form = forms.Form()
             self.form.Title = "Smart Skin | native FULLCYCLE preview"
             self.form.ClientSize = drawing.Size(600, 740)
@@ -1136,6 +1279,7 @@ def run(doc, capture, kernel):
             self.limitation.Wrap = forms.WrapMode.Word
             instruction = forms.Label()
             instruction.Text = ("Enter / Space / right-click: accept only when the required attachment checks pass.\n"
+                                "At READY, click a preview guide or handle, then use its slider. Lists also select.\n"
                                 "Esc or closing this window: discard preview. Sources stay unchanged.")
             instruction.Wrap = forms.WrapMode.Word
             layout = forms.DynamicLayout()
@@ -1177,6 +1321,7 @@ def run(doc, capture, kernel):
             self.status.KeyDown += self.on_key
             Rhino.RhinoApp.EscapeKeyPressed += self.on_escape
             self.conduit.Enabled = True
+            self.mouse.Enabled = False
 
         def cancelled(self):
             # Pump only at explicit bounded kernel/native checkpoints. This
@@ -1184,18 +1329,47 @@ def run(doc, capture, kernel):
             # results and the rebuilding guard prevents nested evaluations.
             if self.state.closed or self.state.cancelled:
                 return True
-            Rhino.RhinoApp.Wait()
+            self.refresh_progress()
+            if not self.pumping_events:
+                self.pumping_events = True
+                try:
+                    Rhino.RhinoApp.Wait()
+                finally:
+                    self.pumping_events = False
             if self.deadline is not None and time.monotonic() >= self.deadline:
                 self.timed_out = True
                 return True
             return self.state.closed or self.state.cancelled
 
+        def set_stage(self, name):
+            self.stage_name = name
+            self.refresh_progress(force=True)
+            elapsed = 0.0 if self.build_started is None else time.monotonic() - self.build_started
+            Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_STAGE | {0} | elapsed={1:.1f}s".format(name, elapsed))
+
+        def refresh_progress(self, force=False):
+            if self.disposed or self.state.closed or self.state.cancelled or not self.state.building:
+                return
+            now = time.monotonic()
+            if not force and now - self.progress_updated < 0.5:
+                return
+            self.progress_updated = now
+            elapsed = 0.0 if self.build_started is None else now - self.build_started
+            self.status.Text = ("{0}\nElapsed {1:.1f} s / {2:g} s total budget.\n"
+                                "Building and checking; guide/handle controls become available at READY.\n"
+                                "Esc cancels between supported operations; one native call cannot be force-interrupted.").format(
+                                    self.stage_name, elapsed, self.build_budget or CACHED_BUILD_SECONDS)
+            Rhino.RhinoApp.SetCommandPrompt("Smart Skin: {0}; {1:.0f}/{2:g} s; Esc cancels".format(
+                self.stage_name.lower(), elapsed, self.build_budget or CACHED_BUILD_SECONDS))
+
         def on_escape(self, sender, event):
             if self.disposed or self.state.closed:
                 return
             self.native_screen.invalidate()
+            self.mouse.close()
             self.state.cancel()
             self.timer.Stop()
+            Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_CANCEL_REQUEST | stage=" + self.stage_name)
 
         def on_closing(self, sender, event):
             if self.disposed or self.state.closed:
@@ -1203,6 +1377,7 @@ def run(doc, capture, kernel):
             self.timer.Stop()
             if not self.closing_for_command:
                 self.native_screen.invalidate()
+                self.mouse.close()
                 self.state.cancel()
 
         def on_key(self, sender, event):
@@ -1223,6 +1398,7 @@ def run(doc, capture, kernel):
                 return
             self.accept_requested = False
             self.native_screen.invalidate()
+            self.mouse.close()
             item = self.edits.handles[self.edits.selected_handle]
             value = item["minimum"] + (item["maximum"] - item["minimum"]) * self.slider.Value / 1000.0
             self.edits.set_selected_value(value)
@@ -1248,6 +1424,9 @@ def run(doc, capture, kernel):
                 self.slider.Enabled = bool(self.edits is not None and self.edits.enabled and self.attachment_ready
                                            and self.native_screen.receipt is not None
                                            and item and not locked_reason)
+                self.mouse.Enabled = bool(self.state.can_accept and self.attachment_ready
+                                          and self.native_screen.receipt is not None and self.edits is not None
+                                          and self.edits.enabled and self.valid_edit_token is not None)
                 if item is not None:
                     value = self.edits.values[self.edits.selected_handle]
                     self.slider.Value = int(round(1000 * (value - item["minimum"]) / (item["maximum"] - item["minimum"])))
@@ -1283,7 +1462,75 @@ def run(doc, capture, kernel):
             selected = self.edits.selected_guide if self.edits is not None else None
             self.conduit.selected_guide_indices = next((set(item["indices"]) for item in self.guide_groups if item["id"] == selected), set())
             self.conduit.handle_display = self.edits.display_handle() if self.edits is not None else None
+            self.conduit.handle_points = (dict(self.edits.last_valid_positions)
+                                          if self.edits is not None and self.edits.last_valid_positions is not None else {})
             doc.Views.Redraw()
+
+        def pick_viewport(self, event):
+            if (self.disposed or self.state.closed or not self.state.can_accept or not self.attachment_ready
+                    or self.native_screen.receipt is None or self.edits is None or not self.edits.enabled
+                    or self.valid_edit_token is None or event.View is None or event.View.Document is None
+                    or event.View.Document.RuntimeSerialNumber != doc.RuntimeSerialNumber
+                    or event.View.InDynamicViewChange or isinstance(event.View, Rhino.Display.RhinoPageView)):
+                return False
+            revision = self.state.revision
+            picker = None
+            try:
+                deadline = time.monotonic() + VIEWPORT_PICK_SECONDS
+                self.edits.verify_displayed_result(self.valid_edit_token, self.output)
+                ok, reason = capture.verify_sources(doc)
+                if not ok:
+                    self.native_screen.invalidate()
+                    self.state.error = "Source proof changed."
+                    self.status.Text = "BLOCKED: sources changed during preview. " + reason
+                    self.refresh_handle_controls()
+                    return False
+                picker = Rhino.Input.Custom.PickContext()
+                picker.View = event.View
+                picker.PickStyle = Rhino.Input.Custom.PickStyle.PointPick
+                picker.PickMode = Rhino.Input.Custom.PickMode.Wireframe
+                viewport = event.View.ActiveViewport
+                transform = viewport.GetPickTransform(event.ViewportPoint)
+                line = viewport.ClientToWorld(event.ViewportPoint)
+                if not transform.IsValid or not line.IsValid:
+                    raise RuntimeError("The viewport does not have a valid pick frustum.")
+                picker.SetPickTransform(transform)
+                picker.PickLine = line
+                picker.UpdateClippingPlanes()
+                def stale():
+                    return (self.disposed or self.state.closed or not self.state.can_accept
+                            or self.state.revision != revision or self.native_screen.receipt is None
+                            or time.monotonic() >= deadline)
+                points = {key: Rhino.Geometry.Point3d(*point) for key, point in self.conduit.handle_points.items()}
+                picked = pick_native_preview(picker, self.conduit.guides, self.guide_groups, points, stale)
+                if picked is None or stale():
+                    return False
+                kind, identifier = picked
+                guide_id = self.edits.handles[identifier]["guide_id"] if kind == "handle" else identifier
+                self.edits.select_guide(guide_id)
+                if kind == "handle":
+                    self.edits.select_handle(identifier)
+                previous_suppression = self.suppress_changes
+                self.suppress_changes = True
+                try:
+                    self.guide_selector.SelectedIndex = next(index for index, group in enumerate(self.guide_groups)
+                                                              if group["id"] == guide_id)
+                    self.refresh_handle_controls()
+                finally:
+                    self.suppress_changes = previous_suppression
+                self.update_selection_display()
+                return True
+            except Exception as error:
+                if self.disposed or self.state.closed or self.state.cancelled:
+                    return False
+                detail = str(error) if isinstance(error, (ValueError, RuntimeError)) else type(error).__name__
+                _safe_cleanup(lambda: setattr(self.status, "Text", "Viewport selection unavailable: " + detail
+                                              + "\nUse the Guide and Handle lists."))
+                _safe_cleanup(lambda: Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_PICK_UNAVAILABLE | " + detail[:300]))
+                return False
+            finally:
+                if picker is not None:
+                    _safe_cleanup(picker.Dispose)
 
         def on_guide_change(self, sender, event):
             if self.suppress_changes or self.disposed or self.state.closed or self.state.cancelled or self.edits is None:
@@ -1317,30 +1564,28 @@ def run(doc, capture, kernel):
                 return
             started = time.monotonic()
             budget_seconds = COLD_BUILD_SECONDS if self.prepared is None else CACHED_BUILD_SECONDS
+            self.build_started, self.build_budget = started, budget_seconds
             self.deadline = started + budget_seconds
             self.timed_out = False
             self.native_screen.invalidate()
+            self.mouse.close()
             breps, guides = [], []
             def evaluation_cancelled():
                 # The UI pump can receive a newer slider value. Do not spend
                 # another expensive fan rebuild finishing an obsolete value.
                 return self.cancelled() or self.state.superseded(token)
             try:
-                self.status.Text = ("PREPARING: {0:g}-second total budget.\n"
-                                    "Esc between supported operations; one native call cannot be force-interrupted.").format(budget_seconds)
+                self.set_stage("PREPARING NATIVE NETWORK")
                 if self.prepared is None:
                     # Input mapping contains only owned generic numerical data.
                     self.prepared = kernel.prepare(capture.model, cancelled=self.cancelled)
-                if self.edits is None:
-                    provider = getattr(self.prepared, "handle_edit_catalog", None)
-                    self.edits = HandleEditState(provider() if callable(provider) else None,
-                                                 callable(getattr(self.prepared, "evaluate_edit", None)))
-                    self.handle_note.Text = self.edits.reason
-                self.status.Text = "NUMERICAL CHECKS: evaluating current geometry, attachments and projected atlas..."
-                result, edit_token = evaluate_preview_request(self.prepared, self.edits, token[0], evaluation_cancelled)
+                self.set_stage("NUMERICAL ATTACHMENT AND ATLAS CHECKS")
+                result, edit_token, self.edits = evaluate_preview_cycle(
+                    self.prepared, self.edits, token[0], evaluation_cancelled, capture.model, self.set_stage)
+                self.handle_note.Text = self.edits.reason
                 ready, reason = geometry_commit_acceptance(result)
                 if not ready:
-                    raise ValueError(reason)
+                    raise ValueError(reason + " " + str(result.get("reason", "")))
                 ready, reason = attachment_acceptance(result, capture.model)
                 if not ready:
                     raise ValueError(reason)
@@ -1352,10 +1597,9 @@ def run(doc, capture, kernel):
                     if missing:
                         raise ValueError("The constrained edit basis refers to missing preview guides.")
                 self.ensure_owner_context(evaluation_cancelled)
-                self.status.Text = "NATIVE CONVERSION: constructing exact disposable NURBS and Breps..."
+                self.set_stage("NATIVE NURBS CONVERSION")
                 breps, guides, conversion = make_native_geometry(result, Rhino.Geometry, evaluation_cancelled, self.native_screen.context)
-                self.status.Text = ("NATIVE OWNER SCREEN: checking complete captured owners and current patches.\n"
-                                    "Esc between supported operations; one native call cannot be force-interrupted.")
+                self.set_stage("NATIVE OWNER SEPARATION SCREEN")
                 self.native_screen.screen(breps, result, request=request, cancelled=evaluation_cancelled,
                                           guides=guides, conversion=conversion)
                 if edit_token is not None:
@@ -1377,6 +1621,8 @@ def run(doc, capture, kernel):
                                             "READY" if self.attachment_ready else "INSPECTION ONLY", mode,
                                             self.attachment_reason, len(self.conduit.breps), len(self.conduit.guides),
                                             time.monotonic() - started, _metric_text(result))
+                    Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_READY | guides={0} | handles={1} | elapsed={2:.1f}s".format(
+                        len(groups), len(self.edits.handles), time.monotonic() - started))
                 elif not self.state.cancelled:
                     self.native_screen.invalidate()
                     self.status.Text = "UPDATING: a newer handle setting is pending."
@@ -1386,12 +1632,15 @@ def run(doc, capture, kernel):
                           if self.timed_out else str(error)
                           if isinstance(error, (ValueError, RuntimeError)) else type(error).__name__)
                 self.state.complete(token, False, reason)
+                failed_current = token[0] == self.state.revision
+                failure_label = "BLOCKED"
                 if not self.state.closed and not self.state.cancelled:
                     # Only a rejected CURRENT revision may reset the slider.
                     # A newer request arriving while computing keeps priority.
                     if token[0] != self.state.revision:
                         self.status.Text = "UPDATING: rebuilding the newer handle setting."
                     elif self.state.restore_last_valid():
+                        failure_label = "REJECTED"
                         if self.edits is not None and self.edits.enabled:
                             self.edits.restore_last_valid()
                         self.refresh_handle_controls()
@@ -1401,6 +1650,9 @@ def run(doc, capture, kernel):
                                             "and obtains a fresh native separation receipt.\n{1}").format(reason, _metric_text(self.output))
                     else:
                         self.status.Text = "BLOCKED: " + reason + "\nNo current result can be accepted."
+                    if failed_current:
+                        Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_{0} | stage={1} | elapsed={2:.1f}s | {3}".format(
+                            failure_label, self.stage_name, time.monotonic() - started, " ".join(reason.split())[:700]))
             finally:
                 self.deadline = None
                 _dispose_all(breps + guides)
@@ -1410,7 +1662,7 @@ def run(doc, capture, kernel):
 
         def ensure_owner_context(self, cancelled):
             if self.native_screen.context is None:
-                self.status.Text = "NATIVE OWNER SNAPSHOT: copying verified original owners; sources remain unchanged..."
+                self.set_stage("NATIVE OWNER SNAPSHOT")
                 api = _native_owner_api()
                 limits = api.ScreenLimits(seconds=NATIVE_SCREEN_SECONDS)
                 self.native_screen.context = api.create_owner_context(doc, capture, Rhino, cancelled=cancelled, limits=limits)
@@ -1420,13 +1672,14 @@ def run(doc, capture, kernel):
             revision = self.state.revision
             breps, guides = [], []
             self.state.building = True
-            self.deadline = time.monotonic() + CACHED_BUILD_SECONDS
+            self.build_started, self.build_budget = time.monotonic(), CACHED_BUILD_SECONDS
+            self.deadline = self.build_started + CACHED_BUILD_SECONDS
             self.timed_out = False
             def stale():
                 return self.cancelled() or self.state.revision != revision
             try:
                 self.native_screen.invalidate()
-                self.status.Text = "RECHECKING RESTORED PREVIEW: rebuilding exact native copies and screening owners (60-second budget)..."
+                self.set_stage("RECHECKING RESTORED PREVIEW")
                 self.ensure_owner_context(stale)
                 request = self.valid_edit_token.payload if self.valid_edit_token is not None else None
                 ready, reason = geometry_commit_acceptance(self.output)
@@ -1528,7 +1781,7 @@ def run(doc, capture, kernel):
                 self.form.KeyDown -= self.on_key
             def unhook_status():
                 self.status.KeyDown -= self.on_key
-            for action in (unhook_escape, self.timer.Stop, self.conduit.close, self.native_screen.close,
+            for action in (unhook_escape, self.timer.Stop, self.mouse.close, self.conduit.close, self.native_screen.close,
                            unhook_slider, unhook_guide_selector, unhook_handle_selector,
                            unhook_timer, unhook_form, unhook_status,
                            self.form.Close, self.form.Dispose, self.timer.Dispose,
@@ -1541,7 +1794,6 @@ def run(doc, capture, kernel):
         session.form.Show()
         session.rebuild()
         decision = Rhino.Input.Custom.GetOption()
-        decision.SetCommandPrompt("Smart Skin U/V guide inspection: acceptance requires full finite-boundary attachments; Esc cancels")
         decision.AcceptNothing(True)
         decision.SetWaitDuration(100)
         while not session.state.cancelled and session.form.Visible:
@@ -1551,12 +1803,16 @@ def run(doc, capture, kernel):
                 if session.prepare_acceptance():
                     break
                 session.accept_requested = False
-            result = decision.Get()
+            decision.SetCommandPrompt(preview_command_prompt(session.state, bool(session.edits and session.edits.enabled),
+                                                             session.native_screen.receipt is not None))
+            result, current_confirmation = get_preview_decision(decision, session.state, session.native_screen)
             if session.state.cancelled or not session.form.Visible:
                 break
             if result == Rhino.Input.GetResult.Timeout:
                 continue
             if result == Rhino.Input.GetResult.Nothing:
+                if not current_confirmation:
+                    continue
                 if session.prepare_acceptance():
                     session.accept_requested = True
                     break

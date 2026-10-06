@@ -1,6 +1,6 @@
 # Selected U/V handle prototype
 
-Status: experimental field candidate, capability-gated. **Native Rhino API/UI execution is NOT VERIFIED.**
+Status: experimental field candidate, capability-gated. **The F5 corrected interaction in native Rhino is NOT VERIFIED.**
 
 This document describes the selected U/V controller and its integration contract.
 The coupled edit basis now exists separately, and the lower narrow repair has
@@ -17,11 +17,13 @@ claim follows from these tests.
 ## Interaction contract
 
 - Keep the existing single toolbar button and one modeless live window.
-- Select one U row or V profile from a list; its exact preview curve pieces are
+- At READY, left-click one U row or V profile in a model viewport, or select it
+  from the Guide list; its exact preview curve pieces are
   highlighted. U/V means the parameter varying along that guide. Counts come from
   the evaluated network/catalog, not a fixed nine-row assumption. The current
   lower-repaired layout declares eight complete U rows and five V profiles.
-- Select a handle belonging to that guide. A capable engine supplies its anchor,
+- Left-click a displayed handle marker or select a handle from the Handle list.
+  A capable engine supplies its anchor,
   movement direction, range and units. The highlighted handle belongs to the
   currently displayed geometry, not an unbuilt slider request.
 - Current catalog labels are U N normal lift and V N normal lift. The two outer
@@ -46,8 +48,58 @@ claim follows from these tests.
   values; accepting the restored result requires a new native confirmation.
 - Enter, Space and right-click are still native confirmation inputs. Esc/window
   close cancel. No visible Accept/Cancel buttons and no temporary document objects.
-- Viewport dragging is outside this first prototype. The lists and highlighted
-  geometry are its only selection/manipulation interface.
+- The F5 viewport picker tests the exact disposable NURBS and displayed actual
+  handle points with Rhino's native pick aperture and clipping planes. It adds
+  no document objects. Handle hits take priority over incident guides; cursor
+  distance and then camera depth resolve competing hits. All handle markers are
+  drawn from the current request-bound result and included in preview bounds.
+  Selecting changes only the active guide/handle, not values or request revision.
+- Only unmodified left clicks in the captured document's model views are handled.
+  Right/middle clicks, Ctrl/Shift combinations, dynamic navigation, other documents
+  and page/detail views pass through. Pending, building, cancelled, closed or
+  receipt-less states cannot pick. Lists remain available as the selection fallback.
+  Viewport dragging is outside this patch; the slider moves the selected handle.
+
+## F5 field correction
+
+The F4 field image showed the visible, normally positioned window during baseline
+construction/checking, with controls still disabled. It did not establish a modal
+window failure. The user confirmed that the subsequent cancellation was intentional.
+The first catalog was nevertheless read too early: the kernel publishes its handle
+basis only after the first baseline evaluation, while the UI retained the initial
+empty catalog. That deterministic bootstrap defect is repaired in F5.
+
+After a passing baseline and atlas check, the controller rereads the actual catalog
+and evaluates a real neutral selected-handle request. Its geometry, actual handle
+positions, edit proof and subsequent native conversion/receipt all bind to that
+same request before any controls become editable. Missing capability blocks this
+full-cycle command with a named diagnosis rather than publishing an uneditable READY;
+failed neutral evaluation cannot fall back to a usable baseline or global factor.
+
+The initial build now reports construction/checking phases and elapsed time within
+the existing 180-second total budget; cached updates retain 60 seconds. Cooperative
+checkpoints refresh the display at most twice per second and pump the supported UI
+thread with a reentrancy guard. No invented completion percentage or background
+Rhino geometry thread is used. Stage, READY, blocked and cancellation diagnostics
+reach command history; after a failed build the command prompt says BLOCKED rather
+than offering an unexplained guide-inspection step. One native call still cannot
+be force-interrupted.
+An Enter/right-click returned from the native getter is discarded if a new request
+or native-screen generation arrived while it was waiting. A timer rebuild cannot
+turn an old confirmation into acceptance of a newly displayed result.
+
+Viewport hit testing is independently capped at 128 guide curves and 128 handle
+markers, with a 0.25-second cooperative scan budget. Partial, stale or invalid scans
+cannot select a winner. The callback is disabled before rebuilding/disposal and
+consumes only a successful left-down and its matching left-up. API signatures are
+**STATICALLY CHECKED** against RhinoCommon 8.21; mocked callbacks/bootstrap and
+transaction regressions are **VERIFIED**. CPython callback dispatch, exact native
+pick return values, Rhino 8.35 click consumption, actual visibility/occlusion and
+navigation behavior remain **NOT VERIFIED**. Frustum picking is not a scene-occlusion
+certificate. The existing modeless form/owner arrangement is retained.
+
+Primary API references: [McNeel conduit picking sample](https://developer.rhino3d.com/en/samples/rhinocommon/pick-points/),
+[Rhino MouseCallback sample](https://github.com/mcneel/rhino-developer-samples/blob/8/rhinopython/SampleMouseCallback.py).
 
 ## Current integration gate
 

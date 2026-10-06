@@ -77,3 +77,10 @@ dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --
 - Version `0.0.18-p08e1f4` separates the exact selected 3D-edge attachment frame from the native 2D-trim push-forward frame used to identify the occupied corner wedge. Do not demand cross-representation orthogonality or silently discard native trim provenance.
 - Retain exact original source data, physical G0/G1/G2 gates, sidedness/contact rules, F3 constructed geometry and selected U/V behavior. Reject ambiguous frame correspondence with scalar diagnostics.
 - Preserve the F2 installer and exact-SHA Windows CI delivery pipeline. Native host behavior remains subject to a fresh field test.
+
+## P08E1F5 preview lifecycle and selection
+
+- Version `0.0.19-p08e1f5` repairs the lazy handle-catalog lifecycle: after a verified baseline creates the basis, refresh the catalog and obtain a real neutral edit result with the exact request/proofs/positions before enabling interaction.
+- Preparation must show its current stage, elapsed time and bounded budget. A cancelled or failed initial build must not look like a finished empty inspector. Preserve deliberate Esc/window-close cancellation.
+- READY-only viewport left-click selection may choose current generated U/V guides and handles without creating document objects. Keep dropdown fallback and Enter/Space/right-click acceptance. Native callback behavior remains a field-verification boundary.
+- Do not weaken attachment, native-owner, source-snapshot, revision or transactional commit gates. Keep F4 geometry/capture, installer algorithms and exact-SHA CI delivery unchanged.

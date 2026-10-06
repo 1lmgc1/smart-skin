@@ -105,6 +105,19 @@ class PreviewStateTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 preview.PreviewState().request(value)
 
+    def test_command_prompt_distinguishes_building_blocked_and_ready(self):
+        state = preview.PreviewState()
+        self.assertIn('building and checking', preview.preview_command_prompt(state))
+        state.complete(state.begin(), False, 'Native screen failed.')
+        self.assertIn('BLOCKED', preview.preview_command_prompt(state))
+        self.assertNotIn('Enter/Space/right-click adds', preview.preview_command_prompt(state))
+        state.request(1.)
+        state.complete(state.begin(), True)
+        self.assertIn('restored preview', preview.preview_command_prompt(state, True, False))
+        self.assertNotIn('READY', preview.preview_command_prompt(state, True, False))
+        self.assertIn('click a preview guide/handle', preview.preview_command_prompt(state, True, True))
+        self.assertIn('local handles unavailable', preview.preview_command_prompt(state, False, True))
+
 
 class FakeAttributes:
     def SetUserString(self, key, value):

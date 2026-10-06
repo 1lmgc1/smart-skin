@@ -3,8 +3,9 @@ import copy
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest import mock
 from types import SimpleNamespace
-from attachment_proof_fixtures import source_model, full_attachment_result, shared_tolerances, edit_result
+from attachment_proof_fixtures import source_model, full_attachment_result, shared_tolerances, edit_result, mock_verify_atlas
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('selected_handle_preview_test', ROOT / 'src/SmartSkin.Rhino8/Python/preview.py')
@@ -348,6 +349,91 @@ class SelectedHandleTests(unittest.TestCase):
         self.assertEqual(calls, [1.0])
         self.assertIsNone(token)
         self.assertFalse(preview.attachment_acceptance(output)[0])
+
+
+class LazyCatalogBootstrapTests(unittest.TestCase):
+    def setUp(self):
+        self.calls = []
+        self.ready = False
+        self.baseline = full_attachment_result()
+        self.stages = []
+        self.model = SimpleNamespace(evaluate=self.evaluate, evaluate_edit=self.evaluate_edit,
+                                     handle_edit_catalog=self.catalog)
+        self.addCleanup(mock.patch.stopall)
+        mock.patch.object(preview, '_verify_atlas_separation', side_effect=mock_verify_atlas).start()
+
+    def evaluate(self, h, cancelled):
+        self.calls.append('baseline')
+        self.ready = True
+        return self.baseline
+
+    def catalog(self):
+        self.calls.append('catalog')
+        return catalog() if self.ready else {'enabled': False, 'reason': 'Baseline not prepared.'}
+
+    def evaluate_edit(self, request, cancelled):
+        self.calls.append(('edit', copy.deepcopy(request)))
+        return proven_result(preview.HandleEditToken(request['revision'], request['basis_id'],
+                                                     tuple(sorted(request['values'].items()))))
+
+    def cycle(self, edits=None, cancelled=lambda: False):
+        return preview.evaluate_preview_cycle(self.model, edits, 7, cancelled, source_model(), self.stages.append)
+
+    def test_basis_created_by_first_baseline_is_refreshed_and_neutral_request_is_evaluated(self):
+        # This is the actual production lifecycle: prepare() has no catalog yet.
+        old = preview.HandleEditState(self.catalog(), True)
+        self.assertFalse(old.enabled)
+        self.calls.clear()
+        result, token, state = self.cycle(old)
+        self.assertEqual(self.calls[:2], ['baseline', 'catalog'])
+        self.assertEqual(self.calls[2], ('edit', token.payload))
+        self.assertIsNot(state, old)
+        self.assertTrue(state.enabled)
+        self.assertTrue(all(value == 0. for value in token.payload['values'].values()))
+        state.accept(token, result)
+        state.select_guide('row:0')
+        self.assertEqual(state.display_handle()[1], (0., 0., 1.))
+        self.assertEqual(result['handle_positions_request'], token.payload)
+        self.assertEqual(self.stages, ['BASELINE GEOMETRY AND CHECKS', 'NEUTRAL U/V HANDLE CHECKS'])
+
+    def test_existing_handle_request_keeps_controller_and_never_rebuilds_baseline(self):
+        state = preview.HandleEditState(catalog(), True)
+        state.select_guide('row:0')
+        state.set_selected_value(.4)
+        result, token, same = self.cycle(state)
+        self.assertIs(same, state)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][0], 'edit')
+        self.assertEqual(token.payload['values']['u-interior'], .4)
+
+    def test_failed_baseline_never_publishes_a_catalog_or_calls_local_edit(self):
+        self.baseline.update(valid=False, fatal=True, reason='Synthetic attachment failure.')
+        with self.assertRaisesRegex(ValueError, 'Synthetic attachment failure'):
+            self.cycle()
+        self.assertEqual(self.calls, ['baseline'])
+
+    def test_failed_baseline_atlas_never_enables_handles(self):
+        self.baseline['atlas_separation']['passed'] = False
+        with self.assertRaisesRegex(RuntimeError, 'atlas'):
+            self.cycle()
+        self.assertEqual(self.calls, ['baseline'])
+
+    def test_cancel_after_baseline_never_starts_neutral_edit(self):
+        with self.assertRaisesRegex(RuntimeError, 'cancelled or superseded'):
+            self.cycle(cancelled=lambda: True)
+        self.assertEqual(self.calls, ['baseline'])
+
+    def test_neutral_edit_missing_actual_positions_fails_closed_without_baseline_fallback(self):
+        self.model.evaluate_edit = lambda request, cancelled: self.baseline
+        with self.assertRaises(ValueError):
+            self.cycle()
+        self.assertEqual(self.calls, ['baseline', 'catalog'])
+
+    def test_no_real_basis_blocks_fullcycle_instead_of_publishing_uneditable_ready(self):
+        self.model.handle_edit_catalog = lambda: {'enabled': False, 'reason': 'No basis for this model.'}
+        with self.assertRaisesRegex(ValueError, 'handles are unavailable after baseline validation: No basis'):
+            self.cycle()
+        self.assertEqual(self.calls, ['baseline'])
 
 
 class AttachmentAcceptanceTests(unittest.TestCase):
