@@ -13,6 +13,12 @@ function Assert-Rejected([scriptblock]$Action, [string]$Label, [string]$Expected
 try {
     New-Item -ItemType Directory -Path $TestRoot | Out-Null
     $ValidManifest = Assert-Package $PackageRoot
+    # Windows checkout uses CRLF; validation must accept both exact line-ending forms.
+    foreach ($NewLine in @("`n", "`r`n")) {
+        $Entry = '#! python 3' + $NewLine + '# requirements: numpy==1.26.4, scipy==1.13.1, mpmath==1.3.0' + $NewLine
+        Assert-PythonEntryPoint $Entry
+        Assert-Rejected { Assert-PythonEntryPoint ($Entry.Replace('scipy==1.13.1', 'scipy==0.0.0')) } 'entrypoint-wrong-pin' 'pinned requirements'
+    }
     foreach ($Case in @(@(8, 20, $false), @(8, 21, $true), @(8, 99, $true), @(9, 0, $false), @(7, 99, $false))) {
         if ((Test-CompatibleRhinoVersion $Case[0] $Case[1]) -ne $Case[2]) { throw "Rhino version boundary failure: $Case" }
     }

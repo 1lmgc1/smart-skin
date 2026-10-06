@@ -91,6 +91,14 @@ function Get-AssemblyIdentity([string]$Path, [string]$ExpectedName, [string]$Exp
     if (-not $MetadataText.Contains($Framework)) { throw "Expected framework marker missing from assembly: $Path ($Framework)" }
     return [ordered]@{ name = $Identity.Name; assembly_version = $Identity.Version.ToString(); file_version = $Info.FileVersion; informational_version = $Info.ProductVersion; target_framework = $Framework }
 }
+function Assert-PythonEntryPoint([string]$EntryPoint) {
+    $RequirementsMatch = [regex]::Match($EntryPoint, '(?m)^# requirements:[ \t]*([^\r\n]+)\r?$')
+    $ActualRequirements = @($RequirementsMatch.Groups[1].Value.Split(',') | ForEach-Object { $_.Trim() } | Sort-Object)
+    if ($EntryPoint -notmatch '^#! python 3' -or -not $RequirementsMatch.Success -or ($ActualRequirements -join ';') -ne 'mpmath==1.3.0;numpy==1.26.4;scipy==1.13.1') {
+        throw 'Native entrypoint Python version or pinned requirements directive differs from the manifest.'
+    }
+}
+
 function Assert-Package([string]$Root) {
     $Root = Get-FullPath $Root
     Assert-NoReparsePoint $Root
@@ -127,11 +135,7 @@ function Assert-Package([string]$Root) {
         }
         if ($Manifest.runtime.rhino_cpython_min -ne '3.9' -or $Manifest.runtime.packages.numpy -ne '1.26.4' -or $Manifest.runtime.packages.scipy -ne '1.13.1' -or $Manifest.runtime.packages.mpmath -ne '1.3.0') { throw 'Native Python dependency contract mismatch.' }
         $EntryPoint = Get-Content -LiteralPath (Join-Path $Root 'net48/Python/smart_skin.py') -Raw
-        $RequirementsMatch = [regex]::Match($EntryPoint, '(?m)^# requirements:\s*([^\r\n]+)$')
-        $ActualRequirements = @($RequirementsMatch.Groups[1].Value.Split(',') | ForEach-Object { $_.Trim() } | Sort-Object)
-        if ($EntryPoint -notmatch '^#! python 3' -or -not $RequirementsMatch.Success -or ($ActualRequirements -join ';') -ne 'mpmath==1.3.0;numpy==1.26.4;scipy==1.13.1') {
-            throw 'Native entrypoint Python version or pinned requirements directive differs from the manifest.'
-        }
+        Assert-PythonEntryPoint $EntryPoint
     }
     foreach ($Spec in @(@('SmartSkin.Rhino8.rhp', 'SmartSkin.Rhino8'), @('SmartSkin.Core.dll', 'SmartSkin.Core'))) {
         $Actual = Get-AssemblyIdentity (Join-Path $Root ('net48/' + $Spec[0])) $Spec[1] $script:SmartSkinRuntimeVersion
