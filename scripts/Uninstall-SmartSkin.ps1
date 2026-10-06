@@ -1,134 +1,59 @@
 [CmdletBinding()]
 param(
-    [string]$InstallRoot = "",
-    [string]$RegistryBase = "HKCU:\Software\McNeel\Rhinoceros\8.0\Plug-ins",
-    [Parameter(DontShow = $true)]
-    [switch]$AllowTestInstallRoot
+    [string]$InstallRoot = '',
+    [string]$RegistryBase = 'HKCU:\Software\McNeel\Rhinoceros\8.0\Plug-ins',
+    [Parameter(DontShow = $true)][switch]$AllowTestInstallRoot,
+    [Parameter(DontShow = $true)][ValidateSet('', 'AfterRegistryClear', 'AfterCleanup')][string]$TestFailAt = ''
 )
-
-Set-StrictMode -Version 2.0
-$ErrorActionPreference = "Stop"
-
-$PluginGuid = "b3f42f21-1f15-45e6-9bc2-a68b0b27c877"
-$KnownPluginFiles = @(
-    "SmartSkin.Rhino8.rhp",
-    "SmartSkin.Rhino8.rui",
-    "SmartSkin.Rhino8.pdb",
-    "SmartSkin.Rhino8.deps.json",
-    "SmartSkin.Core.dll",
-    "SmartSkin.Core.pdb"
-)
-
-function Get-FullPath([string]$Path) {
-    return [System.IO.Path]::GetFullPath($Path)
-}
-
-function Get-SmartSkinRegistryKeys([string]$BasePath, [string]$Guid) {
-    if (-not (Test-Path -LiteralPath $BasePath)) {
-        return @()
-    }
-
-    return @(
-        Get-ChildItem -LiteralPath $BasePath -ErrorAction Stop |
-            Where-Object {
-                $_.PSChildName.Trim([char[]]"{}").Equals(
-                    $Guid,
-                    [System.StringComparison]::OrdinalIgnoreCase)
-            }
-    )
-}
-
-function Remove-KnownPluginFiles([string]$PluginPath, [string]$ManagedRoot) {
-    if ([string]::IsNullOrWhiteSpace($PluginPath)) {
-        return 0
-    }
-
-    $FullPluginPath = Get-FullPath $PluginPath
-    if ([System.IO.Path]::GetFileName($FullPluginPath) -ne "SmartSkin.Rhino8.rhp") {
-        throw "Refusing to clean an unexpected registered plug-in path: $FullPluginPath"
-    }
-
-    $PluginDirectory = (Split-Path -Parent $FullPluginPath).TrimEnd('\')
-    $FullManagedRoot = (Get-FullPath $ManagedRoot).TrimEnd('\')
-    if ($PluginDirectory.StartsWith(
-        $FullManagedRoot + [System.IO.Path]::DirectorySeparatorChar,
-        [System.StringComparison]::OrdinalIgnoreCase)) {
-        return 0
-    }
-
-    if (-not (Test-Path -LiteralPath $PluginDirectory -PathType Container)) {
-        return 0
-    }
-
-    $Removed = 0
-    foreach ($Name in $KnownPluginFiles) {
-        $Candidate = Join-Path $PluginDirectory $Name
-        if (Test-Path -LiteralPath $Candidate -PathType Leaf) {
-            Remove-Item -LiteralPath $Candidate -Force
-            $Removed++
-        }
-    }
-
-    if (@(Get-ChildItem -LiteralPath $PluginDirectory -Force).Count -eq 0) {
-        Remove-Item -LiteralPath $PluginDirectory -Force
-    }
-
-    return $Removed
-}
-
+$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Installer-Common.ps1')
+. (Join-Path $PSScriptRoot 'Installer-Lifecycle.ps1')
+$Context = $null
+$Backup = $null
+$Snapshot = @()
+$FileBackups = New-Object 'Collections.Generic.List[object]'
+$RegistryChanged = $Committed = $RecoveryFailed = $false
 try {
-    if ($env:OS -ne "Windows_NT") {
-        throw "Smart Skin uninstallation is supported only on Windows."
+    $Context = Initialize-ProvenInstallContext $InstallRoot $RegistryBase $AllowTestInstallRoot.IsPresent $false $TestFailAt
+    $Current = Join-Path $Context.Root 'current'
+    Assert-ManagedChildPath $Current $Context.Root
+    $Backup = Join-Path $Context.Root ('.previous-uninstall-' + $Context.Id)
+    Assert-ManagedChildPath $Backup $Context.Root
+    $Snapshot = Get-RegistrySnapshot $RegistryBase
+    $RegisteredPaths = Get-RegisteredPluginPaths $Snapshot
+    $Files = @(Get-KnownOldPluginFiles $RegisteredPaths @((Join-Path $Current 'SmartSkin.Rhino8.rhp'), (Join-Path $PSScriptRoot 'net48\SmartSkin.Rhino8.rhp')) $Context)
+    foreach ($Name in $script:SmartSkinKnownRuntimeFiles + @('install-info.json')) {
+        $Path = Join-Path $Current $Name
+        Assert-ManagedChildPath $Path $Context.Root
+        if (Test-Path -LiteralPath $Path -PathType Leaf) { $Files += $Path }
     }
-
-    $RunningRhino = @(Get-Process -Name "Rhino" -ErrorAction SilentlyContinue)
-    if ($RunningRhino.Count -gt 0) {
-        throw "Close every Rhino window before uninstalling Smart Skin."
-    }
-
-    if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-        throw "LOCALAPPDATA is unavailable."
-    }
-    $DefaultInstallRoot = Get-FullPath (Join-Path $env:LOCALAPPDATA "SmartSkin\Rhino8")
-    if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
-        $InstallRoot = $DefaultInstallRoot
-    }
-    $InstallRoot = Get-FullPath $InstallRoot
-    if (-not [string]::Equals(
-        $InstallRoot.TrimEnd('\'),
-        $DefaultInstallRoot.TrimEnd('\'),
-        [System.StringComparison]::OrdinalIgnoreCase) -and
-        -not $AllowTestInstallRoot) {
-        throw "Refusing to use a non-standard install root: $InstallRoot"
-    }
-
-    $RegistryKeys = @(Get-SmartSkinRegistryKeys $RegistryBase $PluginGuid)
-    $RegisteredPaths = @()
-    foreach ($Key in $RegistryKeys) {
-        $Properties = Get-ItemProperty -LiteralPath $Key.PSPath -ErrorAction SilentlyContinue
-        if ($null -ne $Properties -and
-            $Properties.PSObject.Properties.Name -contains "FileName" -and
-            -not [string]::IsNullOrWhiteSpace([string]$Properties.FileName)) {
-            $RegisteredPaths += [string]$Properties.FileName
+    $RegistryChanged = $true
+    Restore-RegistrySnapshot $RegistryBase @()
+    Invoke-TestFailure $Context $TestFailAt 'AfterRegistryClear'
+    foreach ($Path in @($Files | Select-Object -Unique)) { Backup-AndRemovePluginFile $Path $Backup $FileBackups }
+    Invoke-TestFailure $Context $TestFailAt 'AfterCleanup'
+    if (@(Get-PluginRegistryKeys $RegistryBase).Count) { throw 'Smart Skin registration removal could not be verified.' }
+    $Committed = $true
+    Remove-EmptyPluginDirectories @($Files | ForEach-Object { Split-Path -Parent $_ })
+    Remove-EmptyPluginDirectories @((Join-Path $Current 'Python'), $Current)
+    Write-InstallLog "SMARTSKIN_UNINSTALL PASS | removed_registry_keys=$(@($Snapshot | Where-Object { $_.path -notmatch '\\' }).Count) | removed_files=$($FileBackups.Count) | unrelated_files_preserved=True | Rhino_auto_launch=False"
+} catch {
+    $OriginalError = $_
+    if ($Context -and -not $Committed) {
+        try {
+            Restore-RemovedPluginFiles $FileBackups
+            if ($RegistryChanged) { Restore-RegistrySnapshot $RegistryBase $Snapshot }
+            Write-InstallLog 'RECOVERY PASS | prior_files_and_registration_restored=True'
+        } catch {
+            $RecoveryFailed = $true
+            Write-Warning "Recovery needs attention. Keep the temporary backup $Backup. $($_.Exception.Message)"
         }
     }
-
-    foreach ($Key in $RegistryKeys) {
-        Remove-Item -LiteralPath $Key.PSPath -Recurse -Force
+    Write-InstallLog "SMARTSKIN_UNINSTALL FAIL | error=$($OriginalError.Exception.Message)"
+    throw $OriginalError
+} finally {
+    if ($Context) {
+        if (-not $RecoveryFailed) { Remove-LifecycleTemporaryDirectory $Backup $Context.Root }
+        Close-ProvenInstallContext $Context
     }
-
-    $RemovedFiles = 0
-    foreach ($RegisteredPath in @($RegisteredPaths | Select-Object -Unique)) {
-        $RemovedFiles += Remove-KnownPluginFiles $RegisteredPath $InstallRoot
-    }
-
-    if (Test-Path -LiteralPath $InstallRoot -PathType Container) {
-        Remove-Item -LiteralPath $InstallRoot -Recurse -Force
-    }
-
-    Write-Host "SMARTSKIN_UNINSTALL PASS | removed_registry_keys=$($RegistryKeys.Count) | removed_external_files=$RemovedFiles"
-}
-catch {
-    Write-Host "SMARTSKIN_UNINSTALL FAIL | error=$($_.Exception.Message)"
-    throw
 }

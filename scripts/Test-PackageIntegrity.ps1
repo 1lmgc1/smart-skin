@@ -1,0 +1,75 @@
+[CmdletBinding()]
+param([Parameter(Mandatory = $true)][string]$PackageRoot)
+# Portable tests execute actual metadata/hash/manifest helpers, never a Rhino runtime.
+$ErrorActionPreference = 'Stop'
+$PackageRoot = (Resolve-Path -LiteralPath $PackageRoot).Path
+. (Join-Path $PSScriptRoot 'Installer-Common.ps1')
+$TestRoot = Join-Path ([IO.Path]::GetTempPath()) ('SmartSkinPackageTest-' + [Guid]::NewGuid().ToString('N'))
+function Assert-Rejected([scriptblock]$Action, [string]$Label, [string]$Expected) {
+    $Rejected = $false
+    try { & $Action } catch { $Rejected = $true; if ($Expected -and $_.Exception.Message -notmatch $Expected) { throw "Unexpected rejection for ${Label}: $($_.Exception.Message)" }; Write-Host "EXPECTED REJECTION | $Label | $($_.Exception.Message)" }
+    if (-not $Rejected) { throw "Expected package rejection: $Label" }
+}
+try {
+    New-Item -ItemType Directory -Path $TestRoot | Out-Null
+    $ValidManifest = Assert-Package $PackageRoot
+    foreach ($Case in @(@(8, 20, $false), @(8, 21, $true), @(8, 99, $true), @(9, 0, $false), @(7, 99, $false))) {
+        if ((Test-CompatibleRhinoVersion $Case[0] $Case[1]) -ne $Case[2]) { throw "Rhino version boundary failure: $Case" }
+    }
+    $JsonPath = Join-Path $TestRoot 'atomic.json'
+    Write-AtomicJson $JsonPath ([ordered]@{ state = 'initial'; integer = [long]::MaxValue })
+    Write-AtomicJson $JsonPath ([ordered]@{ state = 'updated'; integer = [long]::MaxValue })
+    $Value = Get-Content -LiteralPath $JsonPath -Raw | ConvertFrom-Json
+    if ($Value.state -ne 'updated' -or $Value.integer -ne [long]::MaxValue) { throw 'Atomic JSON replacement lost state/data.' }
+    # A postcommit logging error must not change transaction status or throw.
+    $script:SmartSkinLog = $TestRoot # Add-Content cannot append to a directory.
+    Write-InstallLog 'EXPECTED LOG FAILURE | nonthrowing_after_commit=True'
+    $script:SmartSkinLog = $null
+    $Cases = [ordered]@{
+        'missing-rui' = 'Package file missing'; 'tampered-core' = 'integrity mismatch'; 'extra-file' = 'Unlisted package file'
+        'wrong-version' = 'identity or compatibility'; 'wrong-assembly' = 'Assembly manifest mismatch'
+        'path-traversal' = 'Unsafe or duplicate'; 'duplicate-file' = 'Unsafe or duplicate'
+        'missing-uninstall' = 'Required manifest file missing'; 'bad-size' = 'integrity mismatch'
+        'missing-lifecycle-helper' = 'Required manifest file missing'; 'wrong-installer-revision' = 'identity or compatibility'
+        'wrong-runtime-version' = 'identity or compatibility'; 'wrong-runtime-commit' = 'Runtime/source commit identity mismatch'
+    }
+    if ($ValidManifest.feature_status -eq 'EXPERIMENTAL_NATIVE_CURVATURE') {
+        $Cases['missing-engine'] = 'Required native curvature engine asset missing'
+        $Cases['wrong-dependency'] = 'Native Python dependency contract mismatch'
+    } else { Write-Host 'SMARTSKIN_PACKAGE_TEST SKIP | native_engine_contract=NOT VERIFIED in installer-only scaffold' }
+    foreach ($Kind in $Cases.Keys) {
+        $Bad = Join-Path $TestRoot $Kind
+        New-Item -ItemType Directory -Path $Bad | Out-Null
+        Get-ChildItem -LiteralPath $PackageRoot -Force | Copy-Item -Destination $Bad -Recurse
+        $ManifestPath = Join-Path $Bad 'manifest.json'
+        $M = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+        switch ($Kind) {
+            'missing-rui' { Remove-Item -LiteralPath (Join-Path $Bad 'net48/SmartSkin.Rhino8.rui') }
+            'tampered-core' { Add-Content -LiteralPath (Join-Path $Bad 'net48/SmartSkin.Core.dll') -Value 'corruption' }
+            'extra-file' { Set-Content -LiteralPath (Join-Path $Bad 'extra.dll') -Value 'unlisted' }
+            'wrong-version' { $M.version = '0.0.14-p07f2' }
+            'wrong-installer-revision' { $M.installer_revision = 'unverified' }
+            'wrong-runtime-version' { $M.runtime_version = '0.0.16-p08e1' }
+            'wrong-runtime-commit' { $M.runtime_commit = ('a' * 40) }
+            'missing-lifecycle-helper' { $M.files = @($M.files | Where-Object { $_.path -ne 'Installer-Lifecycle.ps1' }); Remove-Item -LiteralPath (Join-Path $Bad 'Installer-Lifecycle.ps1') }
+            'wrong-assembly' { $M.assemblies.'SmartSkin.Core'.assembly_version = '0.0.14.0' }
+            'path-traversal' { $M.files[0].path = '../outside' }
+            'duplicate-file' { $M.files += $M.files[0] }
+            'missing-uninstall' { $M.files = @($M.files | Where-Object { $_.path -ne 'UNINSTALL.cmd' }); Remove-Item -LiteralPath (Join-Path $Bad 'UNINSTALL.cmd') }
+            'bad-size' { $M.files[0].size = -1 }
+            'missing-engine' {
+                $M.feature_status = 'EXPERIMENTAL_NATIVE_CURVATURE'
+                $M.files = @($M.files | Where-Object { $_.path -ne 'net48/Python/native_input.py' })
+                $Engine = Join-Path $Bad 'net48/Python/native_input.py'
+                if (Test-Path -LiteralPath $Engine) { Remove-Item -LiteralPath $Engine }
+            }
+            'wrong-dependency' { $M.feature_status = 'EXPERIMENTAL_NATIVE_CURVATURE'; $M.runtime.packages.scipy = '0.0.0' }
+        }
+        Write-AtomicJson $ManifestPath $M
+        Assert-Rejected { $null = Assert-Package $Bad } $Kind $Cases[$Kind]
+    }
+    Write-Host 'SMARTSKIN_PACKAGE_TEST PASS | metadata/manifests/atomic_json/log_failure=VERIFIED | Windows_lifecycle/native_Rhino=NOT VERIFIED'
+} finally {
+    $script:SmartSkinLog = $null
+    if (Test-Path -LiteralPath $TestRoot) { Remove-Item -LiteralPath $TestRoot -Recurse -Force }
+}

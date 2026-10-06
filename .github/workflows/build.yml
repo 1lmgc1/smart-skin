@@ -1,8 +1,8 @@
-name: build-p07f2
+name: build-p08e1f2-pipeline-repair
 
 on:
   push:
-    branches: [main, p07f2]
+    branches: [main, p08e1-pipeline-repair]
   pull_request:
   workflow_dispatch:
 
@@ -12,15 +12,15 @@ permissions:
 jobs:
   build-test-package:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: P07F2 source integrity guards (not native tests)
+      - name: P08E1 source integrity guards (not native tests)
         shell: powershell
-        run: ./scripts/Test-P07F2Guards.ps1
+        run: ./scripts/Test-P08E1Guards.ps1
       - name: Install .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -31,25 +31,42 @@ jobs:
         run: dotnet build SmartSkin.sln --configuration Release --no-restore -p:SourceRevisionId=${{ github.sha }}
       - name: Core regression tests (no Rhino runtime)
         run: dotnet test tests/SmartSkin.Core.Tests/SmartSkin.Core.Tests.csproj --configuration Release --framework net8.0 --no-build --logger "trx;LogFileName=core-tests.trx"
+      - name: Install Python matching Rhino CPython baseline
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - name: Install pinned numerical test dependencies
+        run: python -m pip install numpy==1.26.4 scipy==1.13.1 mpmath==1.3.0
+      - name: Synthetic numerical and preview-state tests (no Rhino runtime)
+        run: |
+          python -B -m unittest discover -s tests -p "test_skin_kernel.py" -v
+          python -B -m unittest discover -s tests/python -p "test_*.py" -v
       - name: Validate native toolbar
         shell: powershell
         run: ./scripts/Test-Toolbar.ps1 -RuiPath "./src/SmartSkin.Rhino8/bin/Release/net48/SmartSkin.Rhino8.rui"
       - name: Package field-test artifact
         id: package
-        shell: pwsh
-        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.14-p07f2" -Commit "${{ github.sha }}"
+        shell: powershell
+        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.16-p08e1f2" -Commit "${{ github.sha }}"
+      - name: Package integrity and failure helpers
+        shell: powershell
+        env:
+          PACKAGE_ROOT: ${{ steps.package.outputs.package_root }}
+        run: ./scripts/Test-PackageIntegrity.ps1 -PackageRoot $env:PACKAGE_ROOT
       - name: Isolated installer lifecycle
         shell: powershell
         env:
           PACKAGE_ROOT: ${{ steps.package.outputs.package_root }}
         run: ./scripts/Test-InstallerLifecycle.ps1 -PackageRoot $env:PACKAGE_ROOT -LogPath "./artifacts/installer-test.log"
       - name: State native verification boundary
-        shell: pwsh
+        shell: powershell
         run: |
           @"
           commit=${{ github.sha }}
           rhino_native_regressions=NOT_RUN_IN_CI
-          native_selftests=8;automatic_once_before_first_match_in_Rhino
+          native_loading=NOT VERIFIED
+          experimental_curvature_control=NOT VERIFIED
+          legacy_native_selftests=NOT_RUN_IN_CI;new_engine_requires_native_field_validation
           ui_rendering=NOT_RUN_IN_CI
           private_geometry=NOT_VERIFIED
           "@ | Set-Content ./artifacts/verification-scope.txt
@@ -57,7 +74,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P07F2-test-report-${{ github.run_number }}
+          name: SmartSkin-P08E1F2-test-report-${{ github.run_number }}
           path: |
             tests/SmartSkin.Core.Tests/TestResults/*.trx
             artifacts/installer-test.log
@@ -67,7 +84,7 @@ jobs:
       - name: Upload Rhino field-test package
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P07F2-${{ github.run_number }}-${{ github.sha }}
+          name: SmartSkin-P08E1F2-${{ github.run_number }}-${{ github.sha }}
           path: ${{ steps.package.outputs.artifact_path }}
           if-no-files-found: error
           compression-level: 0

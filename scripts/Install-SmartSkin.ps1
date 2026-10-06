@@ -1,266 +1,113 @@
 [CmdletBinding()]
 param(
     [string]$PackageRoot = $PSScriptRoot,
-    [string]$InstallRoot = "",
-    [string]$RegistryBase = "HKCU:\Software\McNeel\Rhinoceros\8.0\Plug-ins",
-    [Parameter(DontShow = $true)]
-    [switch]$SkipRhinoInstalledCheck,
-    [Parameter(DontShow = $true)]
-    [switch]$AllowTestInstallRoot
+    [string]$InstallRoot = '',
+    [string]$RegistryBase = 'HKCU:\Software\McNeel\Rhinoceros\8.0\Plug-ins',
+    [Parameter(DontShow = $true)][switch]$SkipRhinoInstalledCheck,
+    [Parameter(DontShow = $true)][switch]$AllowTestInstallRoot,
+    [Parameter(DontShow = $true)][ValidateSet('', 'AfterPayload', 'AfterRegistryClear', 'AfterRegistryWrite', 'AfterCleanup')][string]$TestFailAt = ''
 )
-
-Set-StrictMode -Version 2.0
-$ErrorActionPreference = "Stop"
-
-$PluginGuid = "b3f42f21-1f15-45e6-9bc2-a68b0b27c877"
-$PluginName = "Smart Skin"
-$Version = "0.0.14-p07f2"
-$KnownPluginFiles = @(
-    "SmartSkin.Rhino8.rhp",
-    "SmartSkin.Rhino8.rui",
-    "SmartSkin.Rhino8.pdb",
-    "SmartSkin.Rhino8.deps.json",
-    "SmartSkin.Core.dll",
-    "SmartSkin.Core.pdb"
-)
-
-function Get-FullPath([string]$Path) {
-    return [System.IO.Path]::GetFullPath($Path)
-}
-
-function Test-SamePath([string]$Left, [string]$Right) {
-    return [string]::Equals(
-        (Get-FullPath $Left).TrimEnd('\'),
-        (Get-FullPath $Right).TrimEnd('\'),
-        [System.StringComparison]::OrdinalIgnoreCase)
-}
-
-function Assert-ManagedChildPath([string]$Path, [string]$ManagedRoot) {
-    $FullPath = (Get-FullPath $Path).TrimEnd('\')
-    $FullRoot = (Get-FullPath $ManagedRoot).TrimEnd('\')
-    $Prefix = $FullRoot + [System.IO.Path]::DirectorySeparatorChar
-
-    if (-not $FullPath.StartsWith($Prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to modify a path outside the managed install root: $FullPath"
-    }
-}
-
-function Get-SmartSkinRegistryKeys([string]$BasePath, [string]$Guid) {
-    if (-not (Test-Path -LiteralPath $BasePath)) {
-        return @()
-    }
-
-    return @(
-        Get-ChildItem -LiteralPath $BasePath -ErrorAction Stop |
-            Where-Object {
-                $_.PSChildName.Trim([char[]]"{}").Equals(
-                    $Guid,
-                    [System.StringComparison]::OrdinalIgnoreCase)
-            }
-    )
-}
-
-function Remove-KnownPluginFiles([string]$PluginPath, [string[]]$ProtectedPaths) {
-    if ([string]::IsNullOrWhiteSpace($PluginPath)) {
-        return 0
-    }
-
-    $FullPluginPath = Get-FullPath $PluginPath
-    if ([System.IO.Path]::GetFileName($FullPluginPath) -ne "SmartSkin.Rhino8.rhp") {
-        throw "Refusing to clean an unexpected registered plug-in path: $FullPluginPath"
-    }
-
-    foreach ($ProtectedPath in $ProtectedPaths) {
-        if (Test-SamePath $FullPluginPath $ProtectedPath) {
-            return 0
-        }
-    }
-
-    $Directory = Split-Path -Parent $FullPluginPath
-    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
-        return 0
-    }
-
-    $Removed = 0
-    foreach ($Name in $KnownPluginFiles) {
-        $Candidate = Join-Path $Directory $Name
-        if (Test-Path -LiteralPath $Candidate -PathType Leaf) {
-            Remove-Item -LiteralPath $Candidate -Force
-            $Removed++
-        }
-    }
-
-    if (@(Get-ChildItem -LiteralPath $Directory -Force).Count -eq 0) {
-        Remove-Item -LiteralPath $Directory -Force
-    }
-
-    return $Removed
-}
-
+$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Installer-Common.ps1')
+. (Join-Path $PSScriptRoot 'Installer-Lifecycle.ps1')
+$Version = $script:SmartSkinVersion
+$Context = $null
+$Stage = $Previous = $CleanupBackup = $null
+$Snapshot = @()
+$FileBackups = New-Object 'Collections.Generic.List[object]'
+$MovedPrevious = $InstalledCurrent = $RegistryChanged = $Committed = $RecoveryFailed = $false
 try {
-    if ($env:OS -ne "Windows_NT") {
-        throw "Smart Skin installation is supported only on Windows."
+    # A source checkout is not a runtime kit. Diagnose it before context/prerequisites.
+    Assert-InstallPackageLayout $PackageRoot
+    $PackageRoot = (Resolve-Path -LiteralPath $PackageRoot).Path
+    $Manifest = Assert-Package $PackageRoot
+    if ($Manifest.feature_status -eq 'INSTALLER_SCAFFOLD_INCOMPLETE') { throw 'An installer-test scaffold is not a runtime install kit. Download the complete GitHub CI install ZIP.' }
+    $Context = Initialize-ProvenInstallContext $InstallRoot $RegistryBase $AllowTestInstallRoot.IsPresent $SkipRhinoInstalledCheck.IsPresent $TestFailAt
+    if (-not $SkipRhinoInstalledCheck) { Assert-RhinoPrerequisites }
+    Assert-NoForeignRegistration $RegistryBase
+    $Current = Join-Path $Context.Root 'current'
+    $Stage = Join-Path $Context.Root ('.staging-' + $Context.Id)
+    $Previous = Join-Path $Context.Root ('.previous-' + $Context.Id)
+    $CleanupBackup = Join-Path $Context.Root ('.staging-cleanup-' + $Context.Id)
+    foreach ($Path in @($Current, $Stage, $Previous, $CleanupBackup)) { Assert-ManagedChildPath $Path $Context.Root }
+    if ((Test-Path -LiteralPath $Current) -and -not (Test-Path -LiteralPath $Current -PathType Container)) { throw 'The managed current path is not a directory. Nothing will be replaced.' }
+    $DestinationRhp = Join-Path $Current 'SmartSkin.Rhino8.rhp'
+    $SourceRhp = Join-Path $PackageRoot 'net48\SmartSkin.Rhino8.rhp'
+    $Snapshot = Get-RegistrySnapshot $RegistryBase
+    $OldFiles = @(Get-KnownOldPluginFiles (Get-RegisteredPluginPaths $Snapshot) @($SourceRhp, $DestinationRhp) $Context)
+    New-Item -ItemType Directory -Path $Stage | Out-Null
+    if (Test-Path -LiteralPath $Current -PathType Container) {
+        # Retain unrelated files and toolbars in current; replace only our known payload.
+        foreach ($Item in Get-ChildItem -LiteralPath $Current -Recurse -Force) { Assert-NoReparsePoint $Item.FullName }
+        Get-ChildItem -LiteralPath $Current -Force | Copy-Item -Destination $Stage -Recurse
     }
-
-    if (-not $SkipRhinoInstalledCheck) {
-        $RhinoInstallKey = "HKLM:\SOFTWARE\McNeel\Rhinoceros\8.0\Install"
-        if (-not (Test-Path -LiteralPath $RhinoInstallKey)) {
-            throw "Rhino 8 installation was not found."
+    foreach ($Name in $script:SmartSkinKnownRuntimeFiles) {
+        $Old = Join-Path $Stage $Name
+        if (Test-Path -LiteralPath $Old -PathType Leaf) { Remove-Item -LiteralPath $Old -Force }
+    }
+    $Payload = @($Manifest.files | Where-Object { $_.path.StartsWith('net48/') })
+    foreach ($File in $Payload) {
+        $Relative = ([string]$File.path).Substring(6)
+        if ($Relative -notin $script:SmartSkinKnownRuntimeFiles) { throw "Unexpected runtime payload file: $Relative" }
+        $Target = Join-Path $Stage $Relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $Target) -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PackageRoot $File.path) -Destination $Target -Force
+        if ((Get-FileHash -LiteralPath $Target -Algorithm SHA256).Hash -ne $File.sha256) { throw "Staged payload hash mismatch: $Relative" }
+    }
+    Write-AtomicJson (Join-Path $Stage 'install-info.json') ([ordered]@{
+        product = 'Smart Skin'; version = $Version; runtime_version = $script:SmartSkinRuntimeVersion
+        plugin_guid = $script:SmartSkinGuid; source_commit = $Manifest.runtime_commit
+        installed_utc = [DateTime]::UtcNow.ToString('o'); manifest_sha256 = (Get-FileHash -LiteralPath (Join-Path $PackageRoot 'manifest.json')).Hash
+    })
+    if (@(Get-Process -Name Rhino -ErrorAction SilentlyContinue).Count) { throw 'Rhino opened during installation. Close it and retry.' }
+    if (Test-Path -LiteralPath $Current) { Move-Item -LiteralPath $Current -Destination $Previous; $MovedPrevious = $true }
+    Move-Item -LiteralPath $Stage -Destination $Current
+    $InstalledCurrent = $true
+    foreach ($File in $Payload) {
+        if ((Get-FileHash -LiteralPath (Join-Path $Current ([string]$File.path).Substring(6))).Hash -ne $File.sha256) { throw "Installed payload hash mismatch: $($File.path)" }
+    }
+    Invoke-TestFailure $Context $TestFailAt 'AfterPayload'
+    $RegistryChanged = $true
+    Restore-RegistrySnapshot $RegistryBase @()
+    Invoke-TestFailure $Context $TestFailAt 'AfterRegistryClear'
+    # As in the proven installer, retain settings under the canonical GUID key.
+    # Duplicate brace-form registrations are retired without merging their settings.
+    $CanonicalSnapshot = @($Snapshot | Where-Object { (($_.path -split '\\')[0]) -ieq $script:SmartSkinGuid })
+    Restore-RegistrySnapshot $RegistryBase $CanonicalSnapshot
+    $CanonicalKey = Join-Path $RegistryBase $script:SmartSkinGuid
+    New-Item -Path $CanonicalKey -Force | Out-Null
+    New-ItemProperty -LiteralPath $CanonicalKey -Name 'Name' -PropertyType String -Value 'Smart Skin' -Force | Out-Null
+    New-ItemProperty -LiteralPath $CanonicalKey -Name 'FileName' -PropertyType String -Value $DestinationRhp -Force | Out-Null
+    Invoke-TestFailure $Context $TestFailAt 'AfterRegistryWrite'
+    if (@(Get-PluginRegistryKeys $RegistryBase).Count -ne 1 -or -not (Test-SamePath ([string](Get-ItemProperty -LiteralPath $CanonicalKey).FileName) $DestinationRhp)) { throw 'Registry activation verification failed.' }
+    foreach ($Path in $OldFiles) { Backup-AndRemovePluginFile $Path $CleanupBackup $FileBackups }
+    # Test actual post-deletion rollback while temporary recovery copies still exist.
+    Invoke-TestFailure $Context $TestFailAt 'AfterCleanup'
+    $Committed = $true
+    Remove-EmptyPluginDirectories @($OldFiles | ForEach-Object { Split-Path -Parent $_ })
+    Write-InstallLog "SMARTSKIN_INSTALL PASS | version=$Version | removed_old_files=$($FileBackups.Count) | path=$DestinationRhp | Rhino_auto_launch=False"
+    Write-Host 'Installation finished. Open Rhino yourself when ready. Native Rhino geometry and UI remain NOT VERIFIED.'
+} catch {
+    $OriginalError = $_
+    if ($Context -and -not $Committed) {
+        try {
+            Restore-RemovedPluginFiles $FileBackups
+            if ($RegistryChanged) { Restore-RegistrySnapshot $RegistryBase $Snapshot }
+            if ($InstalledCurrent -and (Test-Path -LiteralPath $Current)) { Remove-Item -LiteralPath $Current -Recurse -Force }
+            if ($MovedPrevious -and (Test-Path -LiteralPath $Previous)) { Move-Item -LiteralPath $Previous -Destination $Current }
+            Write-InstallLog 'RECOVERY PASS | prior_files_and_registration_restored=True'
+        } catch {
+            $RecoveryFailed = $true
+            Write-Warning "Recovery needs attention. Keep temporary backups under $($Context.Root). $($_.Exception.Message)"
         }
     }
-
-    $RunningRhino = @(Get-Process -Name "Rhino" -ErrorAction SilentlyContinue)
-    if ($RunningRhino.Count -gt 0) {
-        throw "Close every Rhino window before installing Smart Skin."
-    }
-
-    $ResolvedPackageRoot = (Resolve-Path -LiteralPath $PackageRoot).Path
-    $SourceDirectory = Join-Path $ResolvedPackageRoot "net48"
-    $SourceRhp = Join-Path $SourceDirectory "SmartSkin.Rhino8.rhp"
-    $SourceCore = Join-Path $SourceDirectory "SmartSkin.Core.dll"
-    $SourceRui = Join-Path $SourceDirectory "SmartSkin.Rhino8.rui"
-
-    if (-not (Test-Path -LiteralPath $SourceRhp -PathType Leaf)) {
-        throw "Package is incomplete: $SourceRhp was not found."
-    }
-    if (-not (Test-Path -LiteralPath $SourceCore -PathType Leaf)) {
-        throw "Package is incomplete: $SourceCore was not found."
-    }
-
-    $ToolbarValidator = Join-Path $ResolvedPackageRoot "Test-Toolbar.ps1"
-    if (-not (Test-Path -LiteralPath $ToolbarValidator -PathType Leaf)) {
-        throw "Package is incomplete: Test-Toolbar.ps1 was not found."
-    }
-    & $ToolbarValidator -RuiPath $SourceRui
-    $SourceRuiHash = (Get-FileHash -LiteralPath $SourceRui -Algorithm SHA256).Hash
-
-    if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-        throw "LOCALAPPDATA is unavailable."
-    }
-    $DefaultInstallRoot = Get-FullPath (Join-Path $env:LOCALAPPDATA "SmartSkin\Rhino8")
-    if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
-        $InstallRoot = $DefaultInstallRoot
-    }
-    $InstallRoot = Get-FullPath $InstallRoot
-    if (-not (Test-SamePath $InstallRoot $DefaultInstallRoot) -and -not $AllowTestInstallRoot) {
-        throw "Refusing to use a non-standard install root: $InstallRoot"
-    }
-    $CurrentDirectory = Join-Path $InstallRoot "current"
-    $StagingDirectory = Join-Path $InstallRoot (".staging-" + [Guid]::NewGuid().ToString("N"))
-    $BackupDirectory = Join-Path $InstallRoot (".previous-" + [Guid]::NewGuid().ToString("N"))
-    $DestinationRhp = Join-Path $CurrentDirectory "SmartSkin.Rhino8.rhp"
-
-    Assert-ManagedChildPath $CurrentDirectory $InstallRoot
-    Assert-ManagedChildPath $StagingDirectory $InstallRoot
-    Assert-ManagedChildPath $BackupDirectory $InstallRoot
-
-    New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
-    New-Item -ItemType Directory -Path $StagingDirectory -Force | Out-Null
-
-    foreach ($Name in $KnownPluginFiles) {
-        $Candidate = Join-Path $SourceDirectory $Name
-        if (Test-Path -LiteralPath $Candidate -PathType Leaf) {
-            Copy-Item -LiteralPath $Candidate -Destination $StagingDirectory -Force
+    Write-InstallLog "SMARTSKIN_INSTALL FAIL | version=$Version | error=$($OriginalError.Exception.Message)"
+    throw $OriginalError
+} finally {
+    if ($Context) {
+        if (-not $RecoveryFailed) {
+            foreach ($Path in @($Stage, $Previous, $CleanupBackup)) { Remove-LifecycleTemporaryDirectory $Path $Context.Root }
         }
+        Close-ProvenInstallContext $Context
     }
-
-    $StagedRhp = Join-Path $StagingDirectory "SmartSkin.Rhino8.rhp"
-    $StagedCore = Join-Path $StagingDirectory "SmartSkin.Core.dll"
-    $StagedRui = Join-Path $StagingDirectory "SmartSkin.Rhino8.rui"
-    if (-not (Test-Path -LiteralPath $StagedRhp -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $StagedCore -PathType Leaf)) {
-        throw "Staging validation failed."
-    }
-
-    $SourceHash = (Get-FileHash -LiteralPath $SourceRhp -Algorithm SHA256).Hash
-    $StagedHash = (Get-FileHash -LiteralPath $StagedRhp -Algorithm SHA256).Hash
-    if ($SourceHash -ne $StagedHash) {
-        throw "Staged plug-in hash does not match the package."
-    }
-
-    if ((Get-FileHash -LiteralPath $StagedRui -Algorithm SHA256).Hash -ne $SourceRuiHash) {
-        throw "Staged toolbar hash does not match the package."
-    }
-
-    [ordered]@{
-        product = $PluginName
-        version = $Version
-        plugin_guid = $PluginGuid
-        installed_utc = [DateTime]::UtcNow.ToString("o")
-        source_sha256 = $SourceHash
-        toolbar_sha256 = $SourceRuiHash
-    } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $StagingDirectory "install-info.json") -Encoding UTF8
-
-    $RegistryKeys = @(Get-SmartSkinRegistryKeys $RegistryBase $PluginGuid)
-    $OldPluginPaths = @()
-    foreach ($Key in $RegistryKeys) {
-        $Properties = Get-ItemProperty -LiteralPath $Key.PSPath -ErrorAction SilentlyContinue
-        if ($null -ne $Properties -and
-            $Properties.PSObject.Properties.Name -contains "FileName" -and
-            -not [string]::IsNullOrWhiteSpace([string]$Properties.FileName)) {
-            $OldPluginPaths += [string]$Properties.FileName
-        }
-    }
-    $OldPluginPaths = @($OldPluginPaths | Select-Object -Unique)
-
-    $HadCurrent = Test-Path -LiteralPath $CurrentDirectory -PathType Container
-    if ($HadCurrent) {
-        Move-Item -LiteralPath $CurrentDirectory -Destination $BackupDirectory
-    }
-
-    try {
-        Move-Item -LiteralPath $StagingDirectory -Destination $CurrentDirectory
-
-        if ((Get-FileHash -LiteralPath $DestinationRhp -Algorithm SHA256).Hash -ne $SourceHash) {
-            throw "Installed plug-in hash does not match the package."
-        }
-        $InstalledRui = Join-Path $CurrentDirectory "SmartSkin.Rhino8.rui"
-        if ((Get-FileHash -LiteralPath $InstalledRui -Algorithm SHA256).Hash -ne $SourceRuiHash) {
-            throw "Installed toolbar hash does not match the package."
-        }
-    }
-    catch {
-        if (Test-Path -LiteralPath $CurrentDirectory) {
-            Remove-Item -LiteralPath $CurrentDirectory -Recurse -Force
-        }
-        if ($HadCurrent -and (Test-Path -LiteralPath $BackupDirectory)) {
-            Move-Item -LiteralPath $BackupDirectory -Destination $CurrentDirectory
-        }
-        throw
-    }
-
-    New-Item -Path $RegistryBase -Force | Out-Null
-    $CanonicalRegistryKey = Join-Path $RegistryBase $PluginGuid
-    New-Item -Path $CanonicalRegistryKey -Force | Out-Null
-    New-ItemProperty -Path $CanonicalRegistryKey -Name "Name" -PropertyType String -Value $PluginName -Force | Out-Null
-    New-ItemProperty -Path $CanonicalRegistryKey -Name "FileName" -PropertyType String -Value $DestinationRhp -Force | Out-Null
-
-    $RegisteredPath = (Get-ItemProperty -LiteralPath $CanonicalRegistryKey -Name "FileName").FileName
-    if (-not (Test-SamePath ([string]$RegisteredPath) $DestinationRhp)) {
-        throw "Registry validation failed."
-    }
-
-    foreach ($Key in $RegistryKeys) {
-        if ($Key.PSChildName -ne $PluginGuid -and
-            (Test-Path -LiteralPath $Key.PSPath)) {
-            Remove-Item -LiteralPath $Key.PSPath -Recurse -Force
-        }
-    }
-
-    $RemovedOldFiles = 0
-    foreach ($OldPluginPath in $OldPluginPaths) {
-        $RemovedOldFiles += Remove-KnownPluginFiles $OldPluginPath @($SourceRhp, $DestinationRhp)
-    }
-
-    if (Test-Path -LiteralPath $BackupDirectory) {
-        Remove-Item -LiteralPath $BackupDirectory -Recurse -Force
-    }
-
-    Write-Host "Smart Skin $Version installed for Rhino 8."
-    Write-Host "Old registered Smart Skin files removed: $RemovedOldFiles"
-    Write-Host "SMARTSKIN_INSTALL PASS | version=$Version | removed_old_files=$RemovedOldFiles | path=$DestinationRhp | toolbar_sha256=$SourceRuiHash"
-}
-catch {
-    Write-Host "SMARTSKIN_INSTALL FAIL | version=$Version | error=$($_.Exception.Message)"
-    throw
 }

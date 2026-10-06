@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using Rhino;
 using Rhino.Commands;
@@ -14,11 +15,54 @@ using SmartSkin.Core.Routing;
 
 namespace SmartSkin.Rhino8;
 
+[CommandStyle(Style.ScriptRunner)]
 public sealed class SmartSurfaceBuildCommand : Command
 {
+    private static bool _nativeBuildActive;
+
     public override string EnglishName => "SmartSurfaceBuild";
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+        if (_nativeBuildActive)
+        {
+            RhinoApp.WriteLine("SMARTSKIN_P08E1 BLOCKED | code=PREVIEW_ALREADY_ACTIVE");
+            return Result.Cancel;
+        }
+        // Keep the existing command/toolbar identity. Rhino 8's supported
+        // ScriptEditor runner owns CPython and its pinned package environment.
+        // No document object references cross RunScript's command boundary.
+        var assemblyDirectory = Path.GetDirectoryName(typeof(SmartSurfaceBuildCommand).Assembly.Location);
+        var entry = Path.Combine(assemblyDirectory ?? string.Empty, "Python", "smart_skin.py");
+        if (!File.Exists(entry))
+        {
+            RhinoApp.WriteLine("SMARTSKIN_P08E1 BLOCKED | code=PYTHON_ASSETS_MISSING | reinstall the complete Smart Skin bundle");
+            return Result.Failure;
+        }
+        if (RhinoApp.Version.CompareTo(new Version(8, 21)) < 0)
+        {
+            RhinoApp.WriteLine("SMARTSKIN_P08E1 BLOCKED | code=RHINO_821_REQUIRED");
+            return Result.Failure;
+        }
+        // A quote is not a legal Windows filename character; fail closed on
+        // other platforms instead of allowing an installation path as a macro.
+        if (entry.IndexOf('"') >= 0 || entry.IndexOf('\n') >= 0 || entry.IndexOf('\r') >= 0)
+            return Result.Failure;
+        _nativeBuildActive = true;
+        try
+        {
+            return RhinoApp.RunScript("_-ScriptEditor _Run \"" + entry + "\"", false)
+                ? Result.Success : Result.Failure;
+        }
+        finally
+        {
+            _nativeBuildActive = false;
+        }
+    }
+
+    // Preserved for historical diagnostics and review. The single visible
+    // toolbar now enters the native FULLCYCLE workflow above, never MatchSrf.
+    internal static Result RunLegacyCommand(RhinoDoc doc, RunMode mode)
     {
         var objectCountBefore = RhinoDocumentMetrics.ActiveObjectCount(doc);
         var identity = BuildIdentity.FromAssembly(typeof(SmartSurfaceBuildCommand).Assembly);

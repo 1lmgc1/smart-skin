@@ -44,3 +44,20 @@ dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --
 .\scripts\Test-P07F2Guards.ps1
 .\scripts\Package-Artifact.ps1 -Configuration Release -Version 0.0.14-p07f2 -Commit local
 ```
+
+## P08E1 experimental full-cycle patch
+
+- Version `0.0.15-p08e1`: one existing toolbar button dispatches the supported Rhino ScriptRunner/CPython full-cycle native-network constructor. Retain stable GUIDs and the prior implementation as a command-line legacy route.
+- The supported family is explicitly bounded and must be derived from selected native edges/owners, never from a private fixture. Reject ambiguous or unsupported inputs. Preserve rational upper source boundaries homogeneously.
+- Shoulder handle factor changes new guide/surface geometry only. Full-boundary failures, including finite source-side end strips, remain visible; never relabel experimental partial continuity as full G2.
+- Test numerical reconstruction, native input family recognition, preview state and transactions separately. Neither mock tests nor openNURBS readback are licensed Rhino GUI tests.
+- Installer behavior is superseded by the P08E1F2 restoration below. It never resets UI or launches Rhino and refuses an incomplete installer scaffold for production installation.
+- New test commands: `python -B -m unittest discover -s tests -p test_skin_kernel.py -v`, `python -B -m unittest discover -s tests/python -p "test_*.py" -v`, and `scripts/Test-P08E1Guards.ps1`. Use exact runtime dependency pins from the entry script.
+
+## P08E1F2 pipeline restoration
+
+- Version `0.0.16-p08e1f2` restores the proven `current`/HKCU lifecycle and genuine uninstall. Do not reject an administrator token or require machine-registration migration merely because HKLM contains a matching GUID. Do not mutate HKLM plug-in registrations.
+- Keep P08E1 geometry and one-button/live-handle UI unchanged. The correction concerns delivery, identity and installation only.
+- A source checkout is not a runtime package: reject source-layout before prerequisites or identity-specific policy, without hidden building or downloading.
+- Mandatory delivery chain: exact final published source SHA, successful Windows CI and Windows PowerShell 5.1 real-CMD tests, artifact ID, verified outer/inner ZIP hashes, manifest/build-info/runtime identity. Deliver the unchanged CI install ZIP, never a locally rebuilt/repacked substitute.
+- Tests execute the actual packaged launcher and PS scripts with isolated destinations. Token cases, quoting/non-ASCII paths, legacy migration, unrelated-file preservation, repeat update, failure recovery and genuine uninstall must pass. Do not bypass the behavior being tested with IsTest or a stub script.

@@ -1,8 +1,9 @@
 @echo off
-setlocal
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0Uninstall-SmartSkin.ps1"
+setlocal DisableDelayedExpansion
+set "SMARTSKIN_POWERSHELL=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+if exist "%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe" set "SMARTSKIN_POWERSHELL=%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+"%SMARTSKIN_POWERSHELL%" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0Uninstall-SmartSkin.ps1" %*
 set "SMARTSKIN_EXIT=%ERRORLEVEL%"
 echo.
-pause
+if not "%SMARTSKIN_INSTALL_NO_PAUSE%"=="1" pause
 exit /b %SMARTSKIN_EXIT%
-

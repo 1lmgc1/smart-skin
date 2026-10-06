@@ -1,0 +1,2 @@
+# Windows entrypoints remain CRLF in checkout/archive; normalize repository diffs.
+*.cmd text eol=crlf

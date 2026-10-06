@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <None Update="SmartSkin.Rhino8.rui" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Python\**\*.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

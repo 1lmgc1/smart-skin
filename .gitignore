@@ -15,3 +15,7 @@ TestResults/
 cases/raw/
 tests/Fixtures/Restricted/
 
+
+# Runtime payloads are immutable and never ship Python bytecode.
+__pycache__/
+*.pyc

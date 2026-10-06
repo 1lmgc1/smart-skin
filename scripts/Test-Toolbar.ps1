@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$RuiPath
+    [string]$RuiPath,
+    [switch]$StructureOnly
 )
 
 Set-StrictMode -Version 2.0
@@ -118,7 +119,7 @@ try {
         Require ($VisibleMacroIds -notcontains $Spec.macro) "Diagnostic command $($Spec.name) must remain command-line only."
     }
 
-    Add-Type -AssemblyName System.Drawing
+    if (-not $StructureOnly) { Add-Type -AssemblyName System.Drawing }
     $Sizes = @{ small_bitmap = 16; normal_bitmap = 24; large_bitmap = 32 }
     Require (@($Rui.SelectNodes("bitmaps/*")).Count -eq 3) "Expected three bitmap atlases."
     foreach ($Tag in $Sizes.Keys) {
@@ -146,6 +147,7 @@ try {
         }
         Require ([BitConverter]::ToString($Bytes, 16, 4) -eq [BitConverter]::ToString($ExpectedWidth)) "Unexpected PNG width header."
         Require ([BitConverter]::ToString($Bytes, 20, 4) -eq [BitConverter]::ToString($ExpectedHeight)) "Unexpected PNG height header."
+        if ($StructureOnly) { continue }
         $Stream = New-Object System.IO.MemoryStream
         $Image = $null
         $DecodedBitmap = $null
@@ -172,6 +174,7 @@ try {
             $Stream.Dispose()
         }
     }
+    if ($StructureOnly) { Write-Host "SMARTSKIN_TOOLBAR STRUCTURE | XML/GUID/PNG_headers=STATICALLY CHECKED | bitmap_pixel_decode=NOT VERIFIED" }
     Write-Host "SMARTSKIN_TOOLBAR PASS | groups=1 | toolbars=1 | buttons=1 | product=SmartSkin | diagnostics=command-line | icons=16,24,32"
 }
 catch {
