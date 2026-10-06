@@ -25,6 +25,12 @@ The original source owners, geometry constructor, source/shared G0/G1/G2 toleran
 3. At READY, choose a U/V guide and its handle in the viewport or in the lists, then adjust its slider. A new setting is checked before it becomes acceptable. Unsafe settings remain rejected.
 4. Enter/Space/right-click accepts only a current verified result. Esc or closing the window discards it.
 
+## Required-CI numerical repair
+
+The first F5 CI run exposed a pre-existing transformed-input default-profile solver failure. A tiny native mapping residual made a strict optimizer inequality infeasible even though it was already inside the unchanged final dimensionless feasibility allowance. This was reproduced independently without the new UI tests.
+
+A bounded fallback is used only if every original solve fails. It evaluates the same objective with centered analytic derivatives and removes only optimizer rows conservatively proved satisfied over the entire existing handle box under the original final allowance. Solver success, finite values, original bounds and the original world-coordinate feasibility check remain mandatory. Successful original solves return unchanged. This does not relax source/shared G2 or other final geometry gates.
+
 ## Verification boundary
 
 Numerical and mock regressions establish catalog activation, request binding, guarded picking and transaction behavior; exact-source Windows CI verifies build/package/install lifecycle. They do not establish native Rhino viewport callback behavior, UI rendering, timing or owner-query success. Native callback coexistence with Rhino input/navigation requires the next field test; the list fallback remains available.

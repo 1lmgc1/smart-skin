@@ -84,3 +84,5 @@ dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --
 - Preparation must show its current stage, elapsed time and bounded budget. A cancelled or failed initial build must not look like a finished empty inspector. Preserve deliberate Esc/window-close cancellation.
 - READY-only viewport left-click selection may choose current generated U/V guides and handles without creating document objects. Keep dropdown fallback and Enter/Space/right-click acceptance. Native callback behavior remains a field-verification boundary.
 - Do not weaken attachment, native-owner, source-snapshot, revision or transactional commit gates. Keep F4 geometry/capture, installer algorithms and exact-SHA CI delivery unchanged.
+
+- F5 CI repair: a default-profile fallback may run only after all original optimizer attempts fail. Prove any omitted optimizer inequality redundant over the complete existing parameter box with conservative floating bounds, then require solver success, finite/bounded parameters and the original world-coordinate feasibility check. Preserve successful primary outputs exactly; do not loosen physical attachment gates.

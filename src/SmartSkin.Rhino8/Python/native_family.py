@@ -416,6 +416,61 @@ def _quintic(p0,p1,t0,t1,k0,k1,s0,s1,q0,q1):
     return np.array([p0,p0+d0/5,p0+2*d0/5+dd0/20,p1-2*d1/5+dd1/20,p1-d1/5,p1])
 
 
+def _centered_fairing_problem(p0,p1,t0,t1,k0,k1,normal,depth,length,cancelled):
+    """Equivalent dimensionless jerk problem with analytic derivatives.
+
+    Each centered-polynomial row's interval lower bound covers the complete
+    declared handle box; the original world-coordinate gate is checked again.
+    Rows already feasible everywhere under the existing final 1e-8 acceptance
+    tolerance are redundant. Native UV inversion can leave an endpoint tangent
+    projection slightly negative; forcing that row to exact zero makes SLSQP's
+    problem infeasible even though every bounded value passes the actual gate.
+    """
+    coefficients=np.zeros((6,7,3))
+    coefficients[3:6,0]=(p1-p0)/length
+    coefficients[1,1]=t0/5
+    coefficients[2,1]=2*t0/5;coefficients[2,3]=t0/20;coefficients[2,5]=length*k0/20
+    coefficients[3,2]=-2*t1/5;coefficients[3,4]=t1/20;coefficients[3,6]=length*k1/20
+    coefficients[4,2]=-t1/5
+    differences=np.diff(coefficients,axis=0)
+    constraint_coefficients=np.r_[np.einsum('itc,c->it',differences,normal),
+                                  np.einsum('itc,c->it',differences,depth)]
+    low=np.array([1.,.05,.05,-10.,-10.,.05**2,.05**2])
+    high=np.array([1.,3.,3.,10.,10.,9.,9.])
+    terms=np.minimum(constraint_coefficients*low,constraint_coefficients*high)
+    # Bound projection cancellation from the UNPROJECTED vector terms. At
+    # most 64 binary64 operations lie on a coefficient/projection/interval-sum
+    # path; gamma_64 is conservative for this centered polynomial. This is not
+    # an error certificate for the later world-coordinate CP subtraction.
+    magnitudes=abs(coefficients[1:])+abs(coefficients[:-1])
+    projection_magnitudes=np.r_[np.einsum('itc,c->it',magnitudes,abs(normal)),
+                                np.einsum('itc,c->it',magnitudes,abs(depth))]
+    eps=np.finfo(float).eps;gamma=(64*eps)/(1-64*eps)
+    roundoff=gamma*np.maximum(1.,projection_magnitudes@np.maximum(abs(low),abs(high)))
+    lower_bound=np.sum(terms,axis=1)-roundoff
+    gn,gw=np.polynomial.legendre.leggauss(3);gt=(gn+1)/2;gw=gw/2
+    bernstein=np.column_stack(((1-gt)**2,2*gt*(1-gt),gt**2))
+    third=60*bernstein@np.diff(np.eye(6),n=3,axis=0)
+    def monomials(x):return np.array([1.,x[0],x[1],x[2],x[3],x[0]**2,x[1]**2])
+    def monomial_jacobian(x):
+        jac=np.zeros((7,4));jac[1:5]=np.eye(4);jac[5,0]=2*x[0];jac[6,1]=2*x[1]
+        return jac
+    def objective(x):
+        check_cancel(cancelled)
+        jerk=third@np.einsum('itc,t->ic',coefficients,monomials(x))
+        return float(np.einsum('i,ic,ic->',gw,jerk,jerk))
+    def objective_jacobian(x):
+        check_cancel(cancelled)
+        jerk=third@np.einsum('itc,t->ic',coefficients,monomials(x))
+        derivative=np.einsum('ai,itc,tj->acj',third,coefficients,monomial_jacobian(x))
+        return 2*np.einsum('a,ac,acj->j',gw,jerk,derivative)
+    def constraints(x):
+        check_cancel(cancelled);return constraint_coefficients@monomials(x)
+    def constraint_jacobian(x):
+        check_cancel(cancelled);return constraint_coefficients@monomial_jacobian(x)
+    return objective,objective_jacobian,constraints,constraint_jacobian,lower_bound
+
+
 def _fair_handles(p0,p1,t0,t1,k0,k1,normal,depth,cancelled):
     length=np.linalg.norm(p1-p0)
     gn,gw=np.polynomial.legendre.leggauss(3);gt=(gn+1)/2;gw=gw/2
@@ -430,7 +485,21 @@ def _fair_handles(p0,p1,t0,t1,k0,k1,normal,depth,cancelled):
     for start in ([1,1,0,0],[.7,1.3,0,0],[1.3,.7,0,0]):
         fit=minimize(objective,start,method='SLSQP',bounds=[(.05,3),(.05,3),(-10,10),(-10,10)],constraints=[{'type':'ineq','fun':constraints}],options={'maxiter':200,'ftol':1e-10})
         if fit.success and min(constraints(fit.x))>=-1e-8: results.append((objective(fit.x),fit.x*length))
-    if not results: fail('CENTER_GUIDE_FAIRING','No regular monotone quintic endpoint-jet profile passed the bounded fairness solve.')
+    if not results:
+        stable,jacobian,condition,condition_jacobian,lower_bound=_centered_fairing_problem(
+            p0,p1,t0,t1,k0,k1,normal,depth,length,cancelled)
+        active=lower_bound < -1e-8
+        inequalities=[] if not np.any(active) else [dict(type='ineq',fun=lambda x:condition(x)[active],jac=lambda x:condition_jacobian(x)[active])]
+        bounds=[(.05,3),(.05,3),(-10,10),(-10,10)]
+        for start in ([1,1,0,0],[.7,1.3,0,0],[1.3,.7,0,0]):
+            fit=minimize(stable,start,jac=jacobian,method='SLSQP',bounds=bounds,constraints=inequalities,options={'maxiter':200,'ftol':1e-10})
+            if (fit.success and np.all(np.isfinite(fit.x)) and
+                    all(lo<=value<=hi for value,(lo,hi) in zip(fit.x,bounds))):
+                physical_constraints=np.asarray(constraints(fit.x))
+                if np.all(np.isfinite(physical_constraints)) and min(physical_constraints)>=-1e-8:
+                    score=objective(fit.x)
+                    if math.isfinite(score):results.append((score,fit.x*length))
+    if not results: fail('CENTER_GUIDE_FAIRING','No regular monotone quintic endpoint-jet profile passed the bounded fairness solve, including its centered analytic retry.')
     return min(results,key=lambda x:x[0])[1]
 
 
