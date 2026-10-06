@@ -13,6 +13,7 @@ no native provenance fabrication, and no receipt valid for a different edit.
 Rhino UI/native execution is NOT VERIFIED by this pure numeric module.
 """
 import importlib
+import copy
 import math
 import time
 from collections import defaultdict
@@ -117,6 +118,29 @@ def verify_atlas_separation(result, source_model, request=None):
     if receipt.get('adjacency_digest') != _digest(ledger):
         _fail('Stale atlas separation adjacency digest.')
     return True
+
+
+def rebind_identical_neutral_request(baseline,result,source_model,request):
+    """Rebind a completed screen only for identical geometry and exact zero.
+
+    This does not repeat the numerical screen and never supplies a native-owner
+    receipt. The caller must separately seal the trusted baseline/basis state.
+    """
+    values=request.get('values') if isinstance(request,dict) else None
+    if (not isinstance(values,dict) or not values or
+            any(type(x) not in (int,float) or not math.isfinite(x) or x!=0. for x in values.values())):
+        _fail('Atlas neutral rebinding requires exact zero handle values.')
+    verify_atlas_separation(baseline,source_model,None)
+    for key in ('surfaces','patches','guides','network','atlas_adjacency','native_contact_ledger','attachment_proof'):
+        if _digest(baseline.get(key))!=_digest(result.get(key)):
+            _fail('Atlas neutral rebinding changed '+key+'.')
+    binding=_binding(result,source_model,request)
+    _checked_ledger(result,binding)
+    receipt=copy.deepcopy(baseline['atlas_separation'])
+    receipt['request_digest']=binding['request_digest']
+    result['atlas_separation']=receipt
+    verify_atlas_separation(result,source_model,request)
+    return receipt
 
 
 def _checked_ledger(result, binding):

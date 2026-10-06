@@ -1,6 +1,6 @@
 # Selected U/V handle prototype
 
-Status: experimental field candidate, capability-gated. **The F5 corrected interaction in native Rhino is NOT VERIFIED.**
+Status: experimental field candidate, capability-gated. **The F6 corrected interaction in native Rhino is NOT VERIFIED.**
 
 This document describes the selected U/V controller and its integration contract.
 The coupled edit basis now exists separately, and the lower narrow repair has
@@ -100,6 +100,37 @@ certificate. The existing modeless form/owner arrangement is retained.
 
 Primary API references: [McNeel conduit picking sample](https://developer.rhino3d.com/en/samples/rhinocommon/pick-points/),
 [Rhino MouseCallback sample](https://github.com/mcneel/rhino-developer-samples/blob/8/rhinopython/SampleMouseCallback.py).
+
+## F6 performance and binding follow-up
+
+The F5 field run reached the final native-owner binding comparison after numerical
+validation and native conversion, then correctly blocked a stale binding. It did
+not reach READY or add output. Intentional cancellation followed that failure.
+The UI had not yet swapped the new native objects into the display conduit, and
+its initial controls were still disabled; its neutral request was an immutable
+snapshot rather than the live slider-value dictionary.
+
+The UI now throttles Rhino event pumping to one call per 25 milliseconds while
+checking cancellation and deadlines at every numerical checkpoint. The caller's
+obsolete-revision check still runs at every checkpoint. Nested message pumping
+remains guarded, and time spent in a native call cannot be force-interrupted.
+Stage/final logs report checkpoint count, pump count and measured pump time;
+kernel breakdown logs contain only allowlisted finite timing values. Native-host
+speedup is **NOT VERIFIED**; headless throttle tests do not measure Rhino UI cost.
+
+An optional evaluate_initial_neutral(request, cancelled) integration accepts only
+the initial neutral request after the baseline/atlas checks and actual catalog
+refresh. Its kernel contract returns the verbatim validated baseline surfaces and
+guides, with current request-bound positions/proof and fresh symmetry/atlas
+binding. It cannot reuse baseline proof for merely similar elevated coefficients,
+non-neutral edits or changed sources. Failure cannot fall back to an unbound
+baseline; later edits use the normal per-value validator. Native conversion,
+owner screening, separate receipts and per-add checks remain mandatory.
+
+The converter continues to use the same full native fingerprint implementation
+as the owner screen. A detected Brep/guide fingerprint change reports only bounded
+generated component indices, retains the stale-result block, and exposes no raw
+geometry or original object identifiers.
 
 ## Current integration gate
 

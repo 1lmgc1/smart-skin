@@ -278,6 +278,7 @@ class NativeTrim:
 
 class NativeBrep:
     IsValid=True
+    IsSolid=False
     def __init__(self, u=(0.,1.), v=(0.,1.), hole=None):
         self.Faces=NativeItems([NativeFace(u,v,hole)]);self.disposed=False
         self.Trims=NativeItems([SimpleNamespace(Face=self.Faces[0])])
@@ -349,7 +350,7 @@ class NativeIntersector:
 
 
 def native_adapter():
-    return n.RhinoAdapter(SimpleNamespace(Geometry=SimpleNamespace(Point3d=NativePoint,Intersect=SimpleNamespace(Intersection=NativeIntersector)),
+    return n.RhinoAdapter(SimpleNamespace(Geometry=SimpleNamespace(Brep=NativeBrep,Point3d=NativePoint,Intersect=SimpleNamespace(Intersection=NativeIntersector)),
                            FileIO=SimpleNamespace(SerializationOptions=lambda:SimpleNamespace())))
 
 
@@ -427,7 +428,7 @@ class CopiedContextTests(unittest.TestCase):
                             Objects=SimpleNamespace(FindId=lambda key:obj if key=='owner' else None))
         model={'absolute_tolerance':.001,'angle_tolerance':.01,'source_boundaries':{'roles':{'side0':[{'source_key':'owner:1','original_curve_domain':[0.,1.]}]}}}
         capture=SimpleNamespace(model=model,source_proof=[('owner',2,('geometry','attributes'))],verify_sources=lambda doc:(True,''))
-        rhino=SimpleNamespace(Geometry=SimpleNamespace(Point3d=NativePoint,Intersect=SimpleNamespace(Intersection=NativeIntersector)),
+        rhino=SimpleNamespace(Geometry=SimpleNamespace(Brep=NativeBrep,Point3d=NativePoint,Intersect=SimpleNamespace(Intersection=NativeIntersector)),
                                FileIO=SimpleNamespace(SerializationOptions=lambda:SimpleNamespace()))
         return geometry,doc,capture,rhino
     def test_factory_copies_full_owner_and_disposes_only_copies(self):
@@ -667,6 +668,84 @@ class PairedEdgeTrimFrameTests(unittest.TestCase):
         self.assertEqual(result[1],'edge_conormal')
         side['trim_reversed']=False;span=n.SelectedSpan('owner:1',1,(0.,1.),json.dumps(side))
         self.assertIsNone(adapter.owner_witness_clearance(NativePoint(.00001,.5),owner,[(span,contact(key='owner:1'))],[],.001,n._Budget(n.ScreenLimits()))[1])
+
+
+class LazyArchiveBrep(NativeBrep):
+    """Model only the two reproduced lazy fields plus unknown drift."""
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+        self.bbox_cache=0;self.solid_cache=0;self.other_cache=0
+        self.userdata={};self.orientation=False;self.trim_definition=0;self.control_value=0.
+    def GetBoundingBox(self,accurate):
+        self.bbox_cache=1
+        return super().GetBoundingBox(accurate)
+    @property
+    def IsSolid(self):
+        self.solid_cache=3
+        return False
+    def ToJSON(self,serialization):
+        return json.dumps(dict(geometry=json.loads(super().ToJSON(serialization)),
+             bbox_cache=self.bbox_cache,solid_cache=self.solid_cache,other_cache=self.other_cache,
+             userdata=self.userdata,orientation=self.orientation,trim_definition=self.trim_definition,control_value=self.control_value))
+
+
+class FingerprintCacheTests(unittest.TestCase):
+    def test_reproduced_lazy_reads_are_primed_before_first_fingerprint(self):
+        adapter=native_adapter();geometry=LazyArchiveBrep();options=adapter.serialization
+        cold=n._hash(geometry.ToJSON(options));geometry.GetBoundingBox(True)
+        self.assertNotEqual(cold,n._hash(geometry.ToJSON(options)))
+        geometry=LazyArchiveBrep()
+        first=adapter.fingerprint(geometry,n._Budget(n.ScreenLimits()))
+        self.assertEqual((geometry.bbox_cache,geometry.solid_cache),(1,3))
+        geometry.GetBoundingBox(True);unused=geometry.IsSolid
+        self.assertEqual(first,adapter.fingerprint(geometry,n._Budget(n.ScreenLimits())))
+    def test_full_screen_preserves_converter_fingerprint_after_read_only_prepare(self):
+        adapter=native_adapter();owner=LazyArchiveBrep((-1.,0.));patch=LazyArchiveBrep()
+        context=n.NativeOwnerContext([n.OwnerSnapshot('owner',owner,(n.SelectedSpan('owner:1',1,(0.,1.)),))],{},.001,adapter)
+        self.addCleanup(context.dispose)
+        converter_hash=adapter.fingerprint(patch,n._Budget(n.ScreenLimits()))
+        data=ledger([contact(key='owner:1')])
+        receipt=n.screen_native_owners([patch],context,data)
+        self.assertTrue(n.verify_receipt(receipt,[patch],context,data))
+        self.assertEqual(converter_hash,adapter.fingerprint(patch,n._Budget(n.ScreenLimits())))
+    def test_full_serialization_still_detects_definition_orientation_trim_and_userdata(self):
+        for field,value in [('control_value',.125),('orientation',True),('trim_definition',1),('userdata',{'test':'changed'})]:
+            adapter=native_adapter();geometry=LazyArchiveBrep()
+            before=adapter.fingerprint(geometry,n._Budget(n.ScreenLimits()))
+            setattr(geometry,field,value)
+            self.assertNotEqual(before,adapter.fingerprint(geometry,n._Budget(n.ScreenLimits())),field)
+    def test_unknown_archive_drift_still_blocks_with_patch_component(self):
+        adapter=native_adapter();owner=LazyArchiveBrep((-1.,0.));patch=LazyArchiveBrep()
+        context=n.NativeOwnerContext([n.OwnerSnapshot('owner',owner,(n.SelectedSpan('owner:1',1,(0.,1.)),))],{},.001,adapter)
+        self.addCleanup(context.dispose)
+        def hit(*args):
+            patch.other_cache=1
+            return NativeIntersector.BrepBrep(*args)
+        adapter.rg.Intersect.Intersection=SimpleNamespace(BrepBrep=hit,CurveBrep=NativeIntersector.CurveBrep,CurveCurve=NativeIntersector.CurveCurve)
+        with self.assertRaisesRegex(n.SeparationError,'components=generated_patch_archives;patch_indices_0based=0'):
+            n.screen_native_owners([patch],context,ledger([contact(key='owner:1')]))
+    def test_receipt_reports_request_contact_limit_and_patch_components_without_payload(self):
+        adapter=Adapter();owner=Geometry('owner');patch=Geometry('patch')
+        context=n.NativeOwnerContext([n.OwnerSnapshot('private-owner-id',owner,(n.SelectedSpan('owner:0',0,(0.,1.)),))],{},.001,adapter)
+        self.addCleanup(context.dispose)
+        request={'revision':1};data=ledger();receipt=n.screen_native_owners([patch],context,data,request)
+        variants=[('request',dict(request={'revision':2})),
+                  ('contacts',dict(data={**data,'geometry_digest':'private-changed-descriptor'}))]
+        for component,change in variants:
+            with self.assertRaises(n.SeparationError) as caught:
+                n.verify_receipt(receipt,[patch],context,change.get('data',data),change.get('request',request))
+            text=str(caught.exception)
+            self.assertIn('components='+component,text);self.assertNotIn('private-',text)
+        context.limits=replace(context.limits,max_events=context.limits.max_events+1)
+        with self.assertRaisesRegex(n.SeparationError,'components=limits'):
+            n.verify_receipt(receipt,[patch],context,data,request)
+    def test_snapshot_integrity_cannot_be_bypassed_by_changing_only_receipt_digest(self):
+        adapter=Adapter();owner=Geometry('owner');patch=Geometry('patch')
+        context=n.NativeOwnerContext([n.OwnerSnapshot('owner',owner,(n.SelectedSpan('owner:0',0,(0.,1.)),))],{},.001,adapter)
+        self.addCleanup(context.dispose)
+        receipt=n.screen_native_owners([patch],context,ledger())
+        with self.assertRaisesRegex(n.SeparationError,'receipt_integrity'):
+            n.verify_receipt(replace(receipt,_digest='changed'),[patch],context,ledger())
 
 
 if __name__ == '__main__': unittest.main()

@@ -26,6 +26,16 @@ Runtime alias: `_smartskin_p08e1_native_owner_separation`.
 
 All failures raise `SeparationError`, a `RuntimeError` with a `.code`. Failure, partial output, cancellation and exhausted budgets return no receipt.
 
+## Stable native archive fingerprints
+
+The full native archive SHA256 remains the integrity authority. Before every fingerprint (converter issue/verify and owner-screen issue/verify), the shared adapter calls `GetBoundingBox(false)` and reads `IsSolid` on Breps. These are bounded read-only cache preparations. Geometry, topology, trim data, orientation and UserData are not rebuilt, removed, rounded, or replaced by a CRC.
+
+Official openNURBS serialization includes lazy Brep bounding-box and solid-classification fields. Public planar NURBS fixtures reproduce raw archive changes after those two reads while their surface definitions, vertices and orientations remain unchanged. Repeating the shared fingerprint preparation then remains stable. The separate accurate bounding-box operation uses a local result; the inexpensive false overload prepares the serialized Brep cache without repeating the costly tight calculation at every fingerprint. See [Brep archive writer](https://raw.githubusercontent.com/mcneel/opennurbs/8.x/opennurbs_brep_io.cpp) and [bounding-box/solid implementation](https://raw.githubusercontent.com/mcneel/opennurbs/8.x/opennurbs_brep.cpp).
+
+Unexpected archive drift still rejects. Private component snapshots classify the mismatch as source, tolerances, limits, contacts, request, copied-owner scope, or generated patch archives. User-facing diagnostics include bounded zero-based patch/owner indices, without raw geometry, IDs, hashes or parameter payloads. No failure silently refreshes an acceptance receipt.
+
+`tests/python/test_native_archive_cache.py` runs three public tests against pinned rhino3dm8.17: the cache-change reproduction, production adapter priming, and continued rejection of actual geometry/UserData changes. Jobs without this optional test dependency explicitly skip those tests. Adapter/mocked full-screen coverage separately verifies the false-box → accurate-box preparation → event/proximity checks → unchanged full fingerprint order. Actual Rhino8.35 intersector/closest-point behavior and all possible future cache effects remain NOT VERIFIED; residual drift stays fail-closed with component diagnostics.
+
 ## Screen stages
 
 - Validate/bound all owner faces and all generated patches; prepare conservative native bounding boxes, copied actual Brep edges and native actual-trim interior witnesses. Reuse owner preparation across edits while immutable fingerprints match.

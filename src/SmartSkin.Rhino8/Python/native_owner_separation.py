@@ -188,6 +188,17 @@ class RhinoAdapter:
         self.serialization.WriteAnalysisMeshes = False
 
     def fingerprint(self, geometry, budget):
+        # ON_Brep::Write serializes lazy m_bbox and m_is_solid fields even
+        # when render/analysis meshes are excluded. Fresh generated Breps
+        # otherwise change archive bytes after ordinary read-only screening.
+        # Prime these two reproduced caches BEFORE EVERY binding issuer and
+        # verifier (including the converter). Preserve full archive SHA256;
+        # unknown later drift still rejects, never refreshes the receipt.
+        if isinstance(geometry, self.rg.Brep):
+            box = budget.call(geometry.GetBoundingBox, False)
+            if not box.IsValid:
+                _fail('OWNER_SCREEN_NATIVE_FAILURE', 'Native fingerprint bounding-box preparation failed.')
+            budget.call(lambda: geometry.IsSolid)
         raw = budget.call(geometry.ToJSON, self.serialization)
         if not isinstance(raw, str) or not raw:
             _fail('OWNER_SCREEN_NATIVE_FAILURE', 'Native geometry serialization failed.')
@@ -830,8 +841,8 @@ class NativeOwnerContext:
     def prepare(self, budget):
         self.check_live()
         fingerprints = tuple(self.adapter.fingerprint(o.geometry, budget) for o in self.owners)
-        if self._original_fingerprints is not None and fingerprints != self._original_fingerprints:
-            _fail('OWNER_SCREEN_STALE', 'A supposedly immutable copied owner changed.')
+        if self._original_fingerprints is not None:
+            _require_owner_fingerprints(fingerprints, self._original_fingerprints, 'owner_prepare')
         if self._prepared is None:
             prepared = []
             try:
@@ -863,15 +874,23 @@ def create_owner_context(doc, capture, rhino, cancelled=None, limits=None):
     proof = tuple((oid, int(serial), tuple(digests)) for oid, serial, digests in capture.source_proof)
     model_digest = _hash(_json(capture.model))
     def live_check():
-        if (int(doc.RuntimeSerialNumber) != doc_serial or float(doc.ModelAbsoluteTolerance) != tolerance or
-                float(doc.ModelAngleToleranceRadians) != angle_tolerance):
-            _fail('OWNER_SCREEN_STALE', 'The source document or captured tolerances changed.')
-        if (tuple((oid, int(serial), tuple(digests)) for oid, serial, digests in capture.source_proof) != proof or
-                _hash(_json(capture.model)) != model_digest):
-            _fail('OWNER_SCREEN_STALE', 'Captured source identities or provenance changed.')
+        changed = []
+        if int(doc.RuntimeSerialNumber) != doc_serial: changed.append('source_document')
+        if float(doc.ModelAbsoluteTolerance) != tolerance: changed.append('absolute_tolerance')
+        if float(doc.ModelAngleToleranceRadians) != angle_tolerance: changed.append('angular_tolerance')
+        if changed:
+            _fail('OWNER_SCREEN_STALE', 'The source document or captured tolerances changed. '
+                  'stage=live_source_check;components=' + ','.join(changed))
+        changed = []
+        if tuple((oid, int(serial), tuple(digests)) for oid, serial, digests in capture.source_proof) != proof:
+            changed.append('source_identity_proof')
+        if _hash(_json(capture.model)) != model_digest: changed.append('captured_model')
+        if changed:
+            _fail('OWNER_SCREEN_STALE', 'Captured source identities or provenance changed. '
+                  'stage=live_source_check;components=' + ','.join(changed))
         ok, reason = capture.verify_sources(doc)
         if not ok:
-            _fail('OWNER_SCREEN_STALE', reason)
+            _fail('OWNER_SCREEN_STALE', reason + ' stage=live_source_check;component=live_source_snapshot')
     live_check()
     if not 1 <= len(proof) <= limits.max_owners:
         _fail('OWNER_SCREEN_BUDGET', 'Selected owner count exceeds the screen budget.')
@@ -991,18 +1010,60 @@ def _classify_events(curves, points, allowed, allowed_points, adapter, tolerance
         _dispose(curves)
 
 
+@dataclass(frozen=True)
+class _BindingSnapshot:
+    digest: str
+    components: tuple
+    patch_hashes: tuple
+
+
+def _changed_indices(before, after):
+    return tuple(index for index in range(max(len(before), len(after)))
+                 if index >= len(before) or index >= len(after) or before[index] != after[index])
+
+
+def _index_diagnostic(indices):
+    # Bound user-visible diagnostics; never include object IDs or raw hashes.
+    text = ','.join(str(index) for index in indices[:8])
+    return text + (';additional=' + str(len(indices)-8) if len(indices) > 8 else '')
+
+
+def _require_owner_fingerprints(actual, expected, stage):
+    changed = _changed_indices(expected, actual)
+    if changed:
+        _fail('OWNER_SCREEN_STALE', 'A supposedly immutable copied owner changed. '
+              'stage=' + stage + ';component=copied_owner_archive;owner_indices_0based=' + _index_diagnostic(changed))
+
+
+def _binding_mismatch(expected, actual, stage):
+    if expected.digest == actual.digest:
+        return
+    previous = dict(expected.components)
+    current = dict(actual.components)
+    changed = [key for key in sorted(set(previous) | set(current)) if previous.get(key) != current.get(key)]
+    patch_indices = _changed_indices(expected.patch_hashes, actual.patch_hashes)
+    detail = ('The exact geometry/source/request binding changed while screening.' if stage == 'after_screen'
+              else 'Geometry, sources, request, contacts, or captured tolerances changed after screening.')
+    detail += ' stage=' + stage + ';components=' + ','.join(changed or ['unclassified_binding'])
+    if patch_indices:
+        detail += ';patch_indices_0based=' + _index_diagnostic(patch_indices)
+    _fail('OWNER_SCREEN_STALE', detail)
+
+
 def _binding(patches, context, contacts, request, budget):
     context.check_live()
     owners = [[o.key, context.adapter.fingerprint(o.geometry, budget),
                                    [[s.source_key, s.edge_index, list(s.interval), s.side_evidence] for s in o.selected_spans]]
                                   for o in context.owners]
-    if tuple(o[1] for o in owners) != context._original_fingerprints:
-        _fail('OWNER_SCREEN_STALE', 'A supposedly immutable copied owner changed.')
+    _require_owner_fingerprints(tuple(o[1] for o in owners), context._original_fingerprints, 'binding')
     patch_hashes = [context.adapter.fingerprint(p, budget) for p in patches]
     context.check_live()
-    return _hash(_json({'source': context.source_token, 'tolerance': context.tolerance,
-                       'limits': context.limits.__dict__, 'contacts': contacts, 'request': request,
-                       'owners': owners, 'patches': patch_hashes}))
+    payload = {'source': context.source_token, 'tolerance': context.tolerance,
+               'limits': context.limits.__dict__, 'contacts': contacts, 'request': request,
+               'owners': owners, 'generated_patch_archives': patch_hashes}
+    return _BindingSnapshot(_hash(_json(payload)),
+                            tuple((key, _hash(_json(value))) for key, value in sorted(payload.items())),
+                            tuple(patch_hashes))
 
 
 _ISSUER = object()
@@ -1014,6 +1075,7 @@ class SeparationReceipt:
     _digest: str
     _context: object
     _report_json: str
+    _snapshot: object
 
     @property
     def report(self):
@@ -1024,11 +1086,13 @@ def verify_receipt(receipt, patches, context, contacts, request=None, cancelled=
     """Fast identity/source recheck before EVERY native Add; never trusts flags."""
     if type(receipt) is not SeparationReceipt or receipt._issuer is not _ISSUER or receipt._context is not context:
         _fail('OWNER_SCREEN_STALE', 'A current in-process native-owner screening receipt is required.')
+    if type(receipt._snapshot) is not _BindingSnapshot or receipt._snapshot.digest != receipt._digest:
+        _fail('OWNER_SCREEN_STALE', 'The in-process receipt binding is malformed. component=receipt_integrity')
     patches = _bounded_items(patches, context.limits.max_patches, 'Generated-patch')
     normalized, _ = _normal_contacts(contacts, context.owners, len(patches))
     budget = _Budget(context.limits, cancelled)
-    if _binding(patches, context, normalized, request, budget) != receipt._digest:
-        _fail('OWNER_SCREEN_STALE', 'Geometry, sources, request, contacts, or captured tolerances changed after screening.')
+    actual = _binding(patches, context, normalized, request, budget)
+    _binding_mismatch(receipt._snapshot, actual, 'receipt_verify')
     return True
 
 
@@ -1123,11 +1187,11 @@ def screen_native_owners(patches, context, contacts, request=None, cancelled=Non
                 report['completed_pairs'] += 1
         if report['completed_pairs'] != report['expected_pairs']:
             _fail('OWNER_SCREEN_PARTIAL', 'Not every generated-patch/captured-owner pair was screened.')
-        if _binding(patches, context, normalized, request, budget) != initial:
-            _fail('OWNER_SCREEN_STALE', 'The exact geometry/source/request binding changed while screening.')
+        final = _binding(patches, context, normalized, request, budget)
+        _binding_mismatch(initial, final, 'after_screen')
         report.update(checked=True, native_calls=budget.calls, seconds=budget.clock() - budget.started,
                       tolerance=context.tolerance, work_limits=limits.__dict__)
-        return SeparationReceipt(_ISSUER, initial, context, _json(report))
+        return SeparationReceipt(_ISSUER, initial.digest, context, _json(report), initial)
     finally:
         _dispose(contact_geometry)
         for value in prepared:

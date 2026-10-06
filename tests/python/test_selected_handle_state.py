@@ -406,6 +406,36 @@ class LazyCatalogBootstrapTests(unittest.TestCase):
         self.assertEqual(self.calls[0][0], 'edit')
         self.assertEqual(token.payload['values']['u-interior'], .4)
 
+    def test_optional_initial_neutral_api_is_used_only_after_checked_baseline(self):
+        def initial(request, cancelled):
+            self.calls.append(('initial-neutral', copy.deepcopy(request)))
+            return proven_result(preview.HandleEditToken(request['revision'], request['basis_id'],
+                                                        tuple(sorted(request['values'].items()))))
+        self.model.evaluate_initial_neutral = initial
+        result, token, state = self.cycle()
+        self.assertEqual(self.calls[:2], ['baseline', 'catalog'])
+        self.assertEqual(self.calls[2], ('initial-neutral', token.payload))
+        self.assertEqual(len(self.calls), 3)
+        state.accept(token, result)
+        self.assertEqual(result['handle_positions_request'], token.payload)
+        self.calls.clear()
+        self.cycle(state)
+        self.assertEqual(self.calls[0][0], 'edit')
+
+    def test_failed_initial_neutral_api_cannot_fall_back_to_unbound_baseline_or_local_edit(self):
+        def failed(request, cancelled):
+            raise RuntimeError('Neutral geometry identity changed.')
+        self.model.evaluate_initial_neutral = failed
+        with self.assertRaisesRegex(RuntimeError, 'identity changed'):
+            self.cycle()
+        self.assertEqual(self.calls, ['baseline', 'catalog'])
+
+    def test_initial_neutral_api_still_requires_request_bound_proof_and_positions(self):
+        self.model.evaluate_initial_neutral = lambda request, cancelled: self.baseline
+        with self.assertRaises(ValueError):
+            self.cycle()
+        self.assertEqual(self.calls, ['baseline', 'catalog'])
+
     def test_failed_baseline_never_publishes_a_catalog_or_calls_local_edit(self):
         self.baseline.update(valid=False, fatal=True, reason='Synthetic attachment failure.')
         with self.assertRaisesRegex(ValueError, 'Synthetic attachment failure'):
@@ -434,6 +464,19 @@ class LazyCatalogBootstrapTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'handles are unavailable after baseline validation: No basis'):
             self.cycle()
         self.assertEqual(self.calls, ['baseline'])
+
+    def test_stage_timing_output_allows_only_finite_known_numeric_fields(self):
+        metrics = {'geometry_seconds': 1.25, 'basis_seconds': 2., 'prepare_seconds': True,
+                   'validation_seconds': float('nan'), 'atlas_screen_seconds': -1.,
+                   'evaluate_seconds': 10 ** 1000, 'private_path': '/never/log/this'}
+        line = preview.kernel_timing_diagnostic('baseline', metrics)
+        self.assertIn('geometry_seconds=1.25', line)
+        self.assertIn('basis_seconds=2', line)
+        for forbidden in ('prepare_seconds', 'validation_seconds', 'atlas_screen_seconds',
+                          'evaluate_seconds', 'private_path', '/never/log/this'):
+            self.assertNotIn(forbidden, line)
+        self.assertIsNone(preview.kernel_timing_diagnostic('unknown-input-phase', metrics))
+        self.assertIsNone(preview.kernel_timing_diagnostic('neutral', {'unrecognized': 3.}))
 
 
 class AttachmentAcceptanceTests(unittest.TestCase):

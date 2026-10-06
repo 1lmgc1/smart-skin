@@ -20,6 +20,7 @@ import math
 import copy
 import bisect
 import sys
+import hashlib
 from fractions import Fraction
 import time
 from functools import lru_cache
@@ -1136,7 +1137,7 @@ class _PreparedNativeRepairs:
     """
     def __init__(self,spec,cancelled=None):
         started=time.monotonic();spec=copy.deepcopy(spec)
-        self._baseline_geometry=None;self._baseline_result=None;self._uv_edits=None
+        self._baseline_geometry=None;self._baseline_result=None;self._uv_edits=None;self._initial_neutral_seal=None
         try:
             import _smartskin_p08e1_native_family as family
         except ModuleNotFoundError as error:
@@ -1213,6 +1214,7 @@ class _PreparedNativeRepairs:
         callback=cancelled or self.cancelled;_check(callback)
         if type(h) not in (int,float) or not math.isfinite(float(h)) or float(h)!=1.:
             raise UnsupportedFamily('The repaired production baseline is fixed at h=1; use selected U/V handles.')
+        self._initial_neutral_seal=None
         start=time.monotonic();cold=self._baseline_geometry is None
         if cold:
             built=self._construct_geometry(1.,callback)
@@ -1246,6 +1248,55 @@ class _PreparedNativeRepairs:
         _check(callback)
         result['timing']=dict(prepare_seconds=self.prepare_seconds,cold_geometry=cold,geometry_seconds=constructed-start,validation_seconds=validated-constructed,atlas_screen_seconds=screened-validated,basis_seconds=time.monotonic()-screened,evaluate_seconds=time.monotonic()-start,native_conversion_included=False)
         self._baseline_result=copy.deepcopy(result)
+        if self._uv_edits is not None and result.get('valid'):
+            self._initial_neutral_seal=self._initial_neutral_binding(callback)
+        return result
+    def _initial_neutral_binding(self,cancelled=None):
+        """Seal actual trusted inputs/results, catalogue, anchors and responses."""
+        uv=self._uv_edits
+        if uv is None or self._baseline_result is None:
+            raise UnsupportedFamily('No verified baseline is available for neutral handoff.')
+        state=dict(source=self.spec,model_source=self.base.spec,
+                   model_limits=[self.base.scale,self.base.tolerance],baseline=self._baseline_result,
+                   basis_id=uv.basis_id,catalogue=uv.handle_edit_catalog(),records=uv._records,
+                   anchor_map=[uv.rows,uv._cross_breaks,uv._profile_supports,uv._mirror_origin,uv._mirror_normal],
+                   shared_tolerances=uv.shared_tolerances,symmetry_tolerance=uv.symmetry_tolerance,
+                   source_response_error=uv.source_response_error,guide_coverage=uv.guide_coverage)
+        digest=hashlib.sha256(uv._digest(state).encode('utf-8'))
+        byte_count=0
+        arrays=[('baseline',uv._baseline_cp)]+[(key,uv._responses[key]) for key in sorted(uv._responses)]
+        for key,group in arrays:
+            digest.update(key.encode('utf-8'));digest.update(str(len(group)).encode('ascii'))
+            for value in group:
+                if value is None:digest.update(b'none');continue
+                _check(cancelled or self.cancelled)
+                if not isinstance(value,np.ndarray) or value.dtype!=np.dtype(np.float64):
+                    raise UnsupportedFamily('Prepared neutral response storage changed.')
+                array=value;byte_count+=array.nbytes
+                if byte_count>128*1024*1024:
+                    raise UnsupportedFamily('Prepared neutral response seal exceeds its memory bound.')
+                digest.update(str((array.shape,array.dtype.str,array.flags.writeable,array.flags.c_contiguous,array.flags.f_contiguous)).encode('ascii'))
+                digest.update(array.tobytes(order='C'))
+        return digest.hexdigest()
+    def evaluate_initial_neutral(self,request,cancelled=None):
+        """One-time exact-zero handoff; original descriptors keep their proof."""
+        callback=cancelled or self.cancelled;_check(callback)
+        seal=getattr(self,'_initial_neutral_seal',None)
+        if seal is None or seal!=self._initial_neutral_binding(callback):
+            raise UnsupportedFamily('Initial neutral baseline, source, tolerances or basis is stale.')
+        started=time.monotonic()
+        result=self._uv_edits.exact_initial_neutral(self._baseline_result,request,callback)
+        try:
+            import _smartskin_p08e1_atlas_separation as atlas
+        except ModuleNotFoundError as error:
+            if error.name!='_smartskin_p08e1_atlas_separation':raise
+            import atlas_separation as atlas
+        atlas.rebind_identical_neutral_request(self._baseline_result,result,self.spec,request)
+        _check(callback)
+        if seal!=self._initial_neutral_binding(callback):
+            raise UnsupportedFamily('Initial neutral state changed during handoff.')
+        self._initial_neutral_seal=None
+        result['initial_neutral_reuse']['seconds']=time.monotonic()-started
         return result
     def _screen_atlas_result(self,result,cancelled=None):
         try:
@@ -1274,6 +1325,7 @@ class _PreparedNativeRepairs:
         if result.get('valid'):self._screen_atlas_result(result,cancelled)
         return result
     def evaluate_edit(self,request,cancelled=None):
+        self._initial_neutral_seal=None
         if self._uv_edits is None:
             raise UnsupportedFamily('Selected U/V editing requires a fully validated repaired baseline, including native owner separation.')
         return self._uv_edits.evaluate_edit(request,cancelled=cancelled or self.cancelled)

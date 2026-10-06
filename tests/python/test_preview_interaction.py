@@ -134,6 +134,7 @@ class SessionPickTests(unittest.TestCase):
         self.session = Session.__new__(Session)
         s = self.session
         s.disposed = False
+        s.reset_work_counters()
         s.state = p.PreviewState()
         s.state.complete(s.state.begin(), True)
         s.attachment_ready = True
@@ -258,6 +259,76 @@ class SessionPickTests(unittest.TestCase):
         self.assertFalse(s.cancelled())
         self.assertEqual(calls, ['pump'])
         self.assertFalse(s.pumping_events)
+        self.assertEqual(s.event_pumps, 1)
+        self.assertEqual(s.cancel_checkpoints, 2)
+
+    def configure_pump(self):
+        s = self.session
+        s.deadline = None
+        s.timed_out = False
+        s.pumping_events = False
+        s.refresh_progress = mock.Mock()
+        self.rhino.RhinoApp.Wait = mock.Mock()
+        return s
+
+    def test_thousand_checkpoints_inside_cadence_pump_once_but_check_cancel_every_time(self):
+        s = self.configure_pump()
+        with mock.patch.object(p.time, 'monotonic', return_value=100.):
+            for _ in range(1000):
+                self.assertFalse(s.cancelled())
+            s.state.cancel()
+            self.assertTrue(s.cancelled())
+        self.assertEqual(s.cancel_checkpoints, 1001)
+        self.assertEqual(s.event_pumps, 1)
+        self.assertEqual(self.rhino.RhinoApp.Wait.call_count, 1)
+
+    def test_pump_runs_again_after_25ms_but_not_before(self):
+        s = self.configure_pump()
+        now = [100.]
+        with mock.patch.object(p.time, 'monotonic', side_effect=lambda: now[0]):
+            self.assertFalse(s.cancelled())
+            now[0] += .024
+            self.assertFalse(s.cancelled())
+            self.assertEqual(s.event_pumps, 1)
+            now[0] += .002
+            self.assertFalse(s.cancelled())
+        self.assertEqual(s.event_pumps, 2)
+
+    def test_expired_deadline_is_checked_inside_throttle_interval(self):
+        s = self.configure_pump()
+        s.last_event_pump = 100.
+        s.deadline = 100.001
+        with mock.patch.object(p.time, 'monotonic', return_value=100.002):
+            self.assertTrue(s.cancelled())
+        self.assertTrue(s.timed_out)
+        self.assertEqual(s.event_pumps, 0)
+
+    def test_long_event_pump_records_time_and_rechecks_deadline(self):
+        s = self.configure_pump()
+        s.deadline = 101.
+        with mock.patch.object(p.time, 'monotonic', side_effect=[100., 100., 102., 102.]):
+            self.assertTrue(s.cancelled())
+        self.assertTrue(s.timed_out)
+        self.assertEqual(s.event_pump_seconds, 2.)
+        self.assertIn('ui_pumps=1', s.work_diagnostic())
+
+    def test_progress_update_cannot_hide_deadline_expiry_when_pump_is_throttled(self):
+        s = self.configure_pump()
+        s.last_event_pump = 100.
+        s.deadline = 100.01
+        with mock.patch.object(p.time, 'monotonic', side_effect=[100.001, 100.02]):
+            self.assertTrue(s.cancelled())
+        self.assertTrue(s.timed_out)
+        self.assertEqual(s.event_pumps, 0)
+
+    def test_pump_exception_resets_reentrancy_and_keeps_elapsed_counter(self):
+        s = self.configure_pump()
+        self.rhino.RhinoApp.Wait.side_effect = RuntimeError('Synthetic pump failure.')
+        with mock.patch.object(p.time, 'monotonic', side_effect=[100., 100., 100.5]):
+            with self.assertRaisesRegex(RuntimeError, 'pump failure'):
+                s.cancelled()
+        self.assertFalse(s.pumping_events)
+        self.assertEqual(s.event_pump_seconds, .5)
 
     def test_progress_reports_elapsed_stage_without_invented_percentage_and_is_throttled(self):
         s = self.session
@@ -314,6 +385,27 @@ class SessionPickTests(unittest.TestCase):
         self.assertIsNone(s.native_screen.receipt)
         self.assertTrue(any('SMARTSKIN_P08E1_REJECTED' in line and 'Synthetic rejected edit.' in line for line in self.logs))
         self.assertIn('restored preview', p.preview_command_prompt(s.state, True, s.native_screen.receipt is not None))
+
+    def test_new_revision_is_observed_inside_event_pump_throttle_interval(self):
+        s = self.configure_pump()
+        s.mouse = self.mouse
+        s.prepared = NS()
+        s.timer = NS(Start=mock.Mock())
+        s.set_stage = lambda name: setattr(s, 'stage_name', name)
+        s.state.request(1.)
+        def supersede(prepared, edits, revision, cancelled, *args):
+            self.assertFalse(cancelled())
+            s.state.request(1.)
+            self.assertTrue(cancelled())
+            raise RuntimeError('Superseded request.')
+        with mock.patch.dict(s.rebuild.__func__.__globals__, evaluate_preview_cycle=supersede), \
+                mock.patch.object(p.time, 'monotonic', return_value=100.):
+            s.rebuild()
+        self.assertEqual(s.event_pumps, 1)
+        self.assertEqual(s.cancel_checkpoints, 2)
+        self.assertTrue(s.state.pending)
+        self.assertIsNone(s.state.error)
+        self.assertFalse(s.state.can_accept)
 
 
 if __name__ == '__main__':

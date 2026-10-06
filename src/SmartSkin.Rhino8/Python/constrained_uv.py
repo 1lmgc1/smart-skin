@@ -369,6 +369,8 @@ class PreparedUVEdits:
                      'surfaces':self._records,'coupling':'mirror','native_rows':self.rows.tolist(),
                      'retained_guide_bindings':[x[0]['binding'] for x in self._retained_guides]}
         self.basis_id = 'uv-'+self._digest(signature)[:24]
+        for array in self._baseline_cp+[a for group in self._responses.values() for a in group if a is not None]:
+            array.setflags(write=False)
 
     @staticmethod
     def _digest(value):
@@ -957,6 +959,36 @@ class PreparedUVEdits:
             return dict(checked=False,compatible=False,residual=math.inf,tolerance=self.symmetry_tolerance,
                         chart_pairs=0,method='whole-surface rational control-hull reflection bound',reason=str(error))
 
+    def exact_initial_neutral(self,baseline,request,cancelled=None):
+        """Bind a zero operation to the original checked descriptors verbatim.
+
+        The prepared-model caller also verifies its sealed validator/source and
+        basis state. Differential test mode remains non-committable here.
+        """
+        request=self._request(request);self._check(cancelled)
+        if self._digest(self.model.spec)!=self._source_digest:
+            raise ValueError('Captured source records changed after edit preparation.')
+        if any(h['neutral']!=0. or request['values'][h['id']]!=0. for h in self._handle_specs):
+            raise ValueError('Initial neutral handoff requires exact zero handle values.')
+        fields=('surfaces','patches','guides','network','report','metrics','attachment_proof',
+                'atlas_separation','atlas_adjacency','native_contact_ledger')
+        if any(self._digest(baseline.get(key))!=self._digest(self._baseline.get(key)) for key in fields):
+            raise ValueError('Initial neutral descriptors or validator evidence changed.')
+        candidate=dict(surfaces=copy.deepcopy(baseline['surfaces']),patches=copy.deepcopy(baseline['surfaces']),
+                       guides=copy.deepcopy(baseline['guides']),network=copy.deepcopy(baseline['network']),
+                       edit_request=request,guide_coverage=copy.deepcopy(self.guide_coverage),
+                       handle_positions_request=copy.deepcopy(request),
+                       handle_positions={h['id']:self._anchor(h['id'],baseline['surfaces']) for h in self._handle_specs})
+        result=self._finish_edit_candidate(candidate,copy.deepcopy(baseline),cancelled)
+        result['edit_proof']['method']='exact zero operation on the verbatim validated baseline; fresh request positions and symmetry'
+        result['initial_neutral_reuse']=dict(schema='smartskin.exact-neutral.v1',
+            ordered_geometry_unchanged=True,ordered_guides_unchanged=True,network_unchanged=True,
+            native_owner_receipt_reused=False)
+        # Native host receipts belong to the preview session, never this cache.
+        for key in ('native_receipt','native_owner_receipt','native_separation_proof'):
+            result.pop(key,None)
+        return result
+
     def evaluate_edit(self, request, cancelled=None):
         request = self._request(request);self._check(cancelled)
         if self._digest(self.model.spec)!=self._source_digest:
@@ -976,6 +1008,10 @@ class PreparedUVEdits:
                        handle_positions={h['id']:self._anchor(h['id'],surfaces) for h in self._handle_specs})
         # The validator may return a complete result or just a fresh report.
         checked = self.validator(candidate if self.validator_receives_result else surfaces,cancelled or self.cancelled)
+        return self._finish_edit_candidate(candidate,checked,cancelled)
+
+    def _finish_edit_candidate(self,candidate,checked,cancelled=None):
+        request=candidate['edit_request'];surfaces=candidate['surfaces']
         self._check(cancelled)
         if self._digest(self.model.spec)!=self._source_digest:
             raise ValueError('Captured source records changed during edit validation.')
@@ -1033,6 +1069,7 @@ class PreparedUVEdits:
                       commit_disposition=('native_screen_pending' if numeric_ready else 'blocked'),native_screen_pending=numeric_ready,
                       experimental=not bool(report.get('full_boundary_pass',False)))
         result['reason']=reason
-        # No baseline attachment_proof is copied. Only this validator can emit
-        # a fresh, source-bound full finite attachment proof for this value.
+        # Ordinary edits receive only the fresh validator's attachment proof.
+        # The separately sealed exact-neutral path may reuse that same proof
+        # solely with verbatim source-bound geometry, guides and coverage.
         return result

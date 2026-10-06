@@ -1,4 +1,4 @@
-name: build-p08e1f5-preview-interaction
+name: build-p08e1f6-native-cache-latency
 
 on:
   push:
@@ -38,8 +38,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
-      - name: Install pinned numerical test dependencies
-        run: python -m pip install numpy==1.26.4 scipy==1.13.1 mpmath==1.3.0
+      - name: Install pinned numerical and openNURBS test dependencies
+        run: python -m pip install numpy==1.26.4 scipy==1.13.1 mpmath==1.3.0 rhino3dm==8.17.0
       - name: Synthetic numerical and preview-state tests (no Rhino runtime)
         run: |
           python -B -m unittest discover -s tests -p "test_skin_kernel.py" -v
@@ -51,7 +51,7 @@ jobs:
       - name: Package field-test artifact
         id: package
         shell: powershell
-        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.19-p08e1f5" -Commit "${{ github.sha }}"
+        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.20-p08e1f6" -Commit "${{ github.sha }}"
       - name: Package integrity and failure helpers
         shell: powershell
         env:
@@ -78,7 +78,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P08E1F5-test-report-${{ github.run_number }}
+          name: SmartSkin-P08E1F6-test-report-${{ github.run_number }}
           path: |
             tests/SmartSkin.Core.Tests/TestResults/*.trx
             artifacts/installer-test.log
@@ -88,7 +88,7 @@ jobs:
       - name: Upload Rhino field-test package
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P08E1F5-${{ github.run_number }}-${{ github.sha }}
+          name: SmartSkin-P08E1F6-${{ github.run_number }}-${{ github.sha }}
           path: ${{ steps.package.outputs.artifact_path }}
           if-no-files-found: error
           compression-level: 0

@@ -86,3 +86,10 @@ dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --
 - Do not weaken attachment, native-owner, source-snapshot, revision or transactional commit gates. Keep F4 geometry/capture, installer algorithms and exact-SHA CI delivery unchanged.
 
 - F5 CI repair: a default-profile fallback may run only after all original optimizer attempts fail. Prove any omitted optimizer inequality redundant over the complete existing parameter box with conservative floating bounds, then require solver success, finite/bounded parameters and the original world-coordinate feasibility check. Preserve successful primary outputs exactly; do not loosen physical attachment gates.
+
+## P08E1F6 native cache and initial-preview latency
+
+- Version `0.0.20-p08e1f6` prepares disposable Brep bounding-box/solid caches before every full-archive fingerprint. Preserve exact later fingerprints and stale checks; unexplained drift must reject with bounded component diagnostics.
+- Initial neutral U/V handoff may reuse only the sealed, fully validated baseline descriptors verbatim, with fresh source/request/position bindings and a fresh native-owner screen. Non-neutral edits retain full checks.
+- Throttle native event pumping while checking cancellation, revision and deadlines at every numerical checkpoint. Report measured stage/pump timing; headless timing is not Rhino performance verification.
+- Keep physical tolerances, source geometry, upper-only hard-point scope, installer algorithms and exact-SHA Windows CI unchanged. The openNURBS regression package is CI-only, never a Rhino runtime dependency.

@@ -22,6 +22,9 @@ COLD_BUILD_SECONDS = 180.0
 CACHED_BUILD_SECONDS = 60.0
 NATIVE_SCREEN_SECONDS = 15.0
 VIEWPORT_PICK_SECONDS = 0.25
+UI_PUMP_INTERVAL_SECONDS = 0.025
+KERNEL_TIMING_FIELDS = ("prepare_seconds", "geometry_seconds", "validation_seconds",
+                        "atlas_screen_seconds", "basis_seconds", "evaluate_seconds")
 
 
 def _native_owner_api():
@@ -97,8 +100,14 @@ def _verify_checked_conversion(binding, result, breps, guides, context, cancelle
         raise RuntimeError("A converter-issued binding for these exact native Breps and guides is required.")
     if _conversion_descriptor_digest(result, context.limits.max_snapshot_bytes) != binding.descriptor_digest:
         raise RuntimeError("The native conversion belongs to different surface, guide or request descriptors.")
-    if _converted_fingerprints(breps, guides, context, cancelled) != binding.fingerprints:
-        raise RuntimeError("Converted native Brep or guide geometry changed after exact readback.")
+    fingerprints = _converted_fingerprints(breps, guides, context, cancelled)
+    if fingerprints != binding.fingerprints:
+        changed = [index for index, (current, previous) in enumerate(zip(fingerprints, binding.fingerprints))
+                   if current != previous]
+        brep_indices = [index for index in changed if index < len(breps)]
+        guide_indices = [index - len(breps) for index in changed if index >= len(breps)]
+        raise RuntimeError("Converted native Brep or guide geometry changed after exact readback. "
+                           "Generated Brep indices={0}; guide indices={1}.".format(brep_indices[:8], guide_indices[:8]))
 
 
 class NativeScreenState:
@@ -574,7 +583,7 @@ def evaluate_preview_request(prepared, edits, revision, cancelled):
     return prepared.evaluate(1.0, cancelled=cancelled), None
 
 
-def evaluate_preview_cycle(prepared, edits, revision, cancelled, source_model, stage=None):
+def evaluate_preview_cycle(prepared, edits, revision, cancelled, source_model, stage=None, timing=None):
     """Discover a lazily built handle basis after its checked baseline exists.
 
     A catalog captured before the first evaluate() may be intentionally empty.
@@ -587,6 +596,8 @@ def evaluate_preview_cycle(prepared, edits, revision, cancelled, source_model, s
     if stage is not None:
         stage("BASELINE GEOMETRY AND CHECKS")
     result = prepared.evaluate(1.0, cancelled=cancelled)
+    if timing is not None:
+        timing("baseline", result.get("timing", {}))
     for check in (geometry_commit_acceptance(result), attachment_acceptance(result, source_model)):
         if not check[0]:
             raise ValueError(check[1] + " " + str(result.get("reason", "")))
@@ -600,8 +611,29 @@ def evaluate_preview_cycle(prepared, edits, revision, cancelled, source_model, s
         raise ValueError("Selected U/V handles are unavailable after baseline validation: " + refreshed.reason)
     if stage is not None:
         stage("NEUTRAL U/V HANDLE CHECKS")
-    result, token = evaluate_preview_request(prepared, refreshed, revision, cancelled)
+    started = time.monotonic()
+    initial_neutral = getattr(prepared, "evaluate_initial_neutral", None)
+    if callable(initial_neutral):
+        token = refreshed.snapshot(revision)
+        result = initial_neutral(token.payload, cancelled=cancelled)
+        refreshed.verify_result(token, result)
+    else:
+        result, token = evaluate_preview_request(prepared, refreshed, revision, cancelled)
+    if timing is not None:
+        timing("neutral", {"evaluate_seconds": time.monotonic() - started})
     return result, token, refreshed
+
+
+def kernel_timing_diagnostic(phase, metrics):
+    """Only bounded scalar timings enter history; never model data or paths."""
+    if phase not in ("baseline", "neutral") or not isinstance(metrics, dict):
+        return None
+    fields = ["phase=" + phase]
+    for name in KERNEL_TIMING_FIELDS:
+        value = metrics.get(name)
+        if type(value) in (int, float) and 0 <= value <= 1e9 and math.isfinite(value):
+            fields.append("{0}={1:.6g}".format(name, value))
+    return "SMARTSKIN_P08E1_TIMING | " + " | ".join(fields) if len(fields) > 1 else None
 
 
 def preview_command_prompt(state, editable=False, native_ready=False):
@@ -1235,6 +1267,7 @@ def run(doc, capture, kernel):
             self.build_budget = None
             self.progress_updated = 0.0
             self.pumping_events = False
+            self.reset_work_counters()
             self.conduit = Conduit()
             self.mouse = PreviewMouse(self)
             self.form = forms.Form()
@@ -1327,25 +1360,53 @@ def run(doc, capture, kernel):
             # Pump only at explicit bounded kernel/native checkpoints. This
             # permits Esc and newer slider input; revision guards reject stale
             # results and the rebuilding guard prevents nested evaluations.
+            self.cancel_checkpoints += 1
             if self.state.closed or self.state.cancelled:
                 return True
+            now = time.monotonic()
+            if self.deadline is not None and now >= self.deadline:
+                self.timed_out = True
+                return True
             self.refresh_progress()
-            if not self.pumping_events:
+            if (not self.pumping_events and
+                    (self.last_event_pump is None or now - self.last_event_pump >= UI_PUMP_INTERVAL_SECONDS)):
                 self.pumping_events = True
+                started = time.monotonic()
+                self.last_event_pump = started
+                self.event_pumps += 1
                 try:
                     Rhino.RhinoApp.Wait()
                 finally:
+                    now = time.monotonic()
+                    self.last_event_pump = now
+                    self.event_pump_seconds += max(0.0, now - started)
                     self.pumping_events = False
             if self.deadline is not None and time.monotonic() >= self.deadline:
                 self.timed_out = True
                 return True
             return self.state.closed or self.state.cancelled
 
+        def reset_work_counters(self):
+            self.last_event_pump = None
+            self.cancel_checkpoints = 0
+            self.event_pumps = 0
+            self.event_pump_seconds = 0.0
+
+        def work_diagnostic(self):
+            return "checkpoints={0} | ui_pumps={1} | ui_pump_seconds={2:.3f}".format(
+                self.cancel_checkpoints, self.event_pumps, self.event_pump_seconds)
+
+        def report_kernel_timing(self, phase, metrics):
+            line = kernel_timing_diagnostic(phase, metrics)
+            if line is not None:
+                Rhino.RhinoApp.WriteLine(line)
+
         def set_stage(self, name):
             self.stage_name = name
             self.refresh_progress(force=True)
             elapsed = 0.0 if self.build_started is None else time.monotonic() - self.build_started
-            Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_STAGE | {0} | elapsed={1:.1f}s".format(name, elapsed))
+            Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_STAGE | {0} | elapsed={1:.1f}s | {2}".format(
+                name, elapsed, self.work_diagnostic()))
 
         def refresh_progress(self, force=False):
             if self.disposed or self.state.closed or self.state.cancelled or not self.state.building:
@@ -1567,6 +1628,7 @@ def run(doc, capture, kernel):
             self.build_started, self.build_budget = started, budget_seconds
             self.deadline = started + budget_seconds
             self.timed_out = False
+            self.reset_work_counters()
             self.native_screen.invalidate()
             self.mouse.close()
             breps, guides = [], []
@@ -1581,7 +1643,8 @@ def run(doc, capture, kernel):
                     self.prepared = kernel.prepare(capture.model, cancelled=self.cancelled)
                 self.set_stage("NUMERICAL ATTACHMENT AND ATLAS CHECKS")
                 result, edit_token, self.edits = evaluate_preview_cycle(
-                    self.prepared, self.edits, token[0], evaluation_cancelled, capture.model, self.set_stage)
+                    self.prepared, self.edits, token[0], evaluation_cancelled, capture.model,
+                    self.set_stage, self.report_kernel_timing)
                 self.handle_note.Text = self.edits.reason
                 ready, reason = geometry_commit_acceptance(result)
                 if not ready:
@@ -1655,6 +1718,7 @@ def run(doc, capture, kernel):
                             failure_label, self.stage_name, time.monotonic() - started, " ".join(reason.split())[:700]))
             finally:
                 self.deadline = None
+                _safe_cleanup(lambda: Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_WORK | " + self.work_diagnostic()))
                 _dispose_all(breps + guides)
                 if self.state.pending and not self.state.cancelled and not self.state.closed:
                     self.timer.Start()
@@ -1675,6 +1739,7 @@ def run(doc, capture, kernel):
             self.build_started, self.build_budget = time.monotonic(), CACHED_BUILD_SECONDS
             self.deadline = self.build_started + CACHED_BUILD_SECONDS
             self.timed_out = False
+            self.reset_work_counters()
             def stale():
                 return self.cancelled() or self.state.revision != revision
             try:
@@ -1706,6 +1771,7 @@ def run(doc, capture, kernel):
             finally:
                 self.deadline = None
                 self.state.building = False
+                _safe_cleanup(lambda: Rhino.RhinoApp.WriteLine("SMARTSKIN_P08E1_WORK | " + self.work_diagnostic()))
                 _dispose_all(breps + guides)
                 self.refresh_handle_controls()
                 if self.state.pending and not self.state.cancelled and not self.state.closed:

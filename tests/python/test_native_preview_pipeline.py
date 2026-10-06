@@ -212,6 +212,17 @@ class NativePreviewPipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'changed after exact readback'):
             self.state.screen([self.patch], self.result, guides=[self.guide], conversion=binding)
 
+    def test_conversion_drift_names_only_changed_generated_component_indices(self):
+        binding = p._issue_checked_conversion(self.result, [self.patch], [self.guide], self.context)
+        for geometry, expected in ((self.patch, 'Brep indices=[0]; guide indices=[]'),
+                                   (self.guide, 'Brep indices=[]; guide indices=[0]')):
+            geometry.version += 1
+            with self.assertRaises(RuntimeError) as caught:
+                p._verify_checked_conversion(binding, self.result, [self.patch], [self.guide], self.context)
+            self.assertIn(expected, str(caught.exception))
+            self.assertNotIn('owner', str(caught.exception).lower())
+            geometry.version -= 1
+
     def test_result_side_conversion_flag_is_not_provenance(self):
         self.result['conversion_binding'] = {'checked': True}
         with self.assertRaisesRegex(RuntimeError, 'converter-issued'):
