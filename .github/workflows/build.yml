@@ -1,4 +1,4 @@
-name: build-p08e1f3-native-uv-controls
+name: build-p08e1f4-native-frame-repair
 
 on:
   push:
@@ -51,7 +51,7 @@ jobs:
       - name: Package field-test artifact
         id: package
         shell: powershell
-        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.17-p08e1f3" -Commit "${{ github.sha }}"
+        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.18-p08e1f4" -Commit "${{ github.sha }}"
       - name: Package integrity and failure helpers
         shell: powershell
         env:
@@ -78,7 +78,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P08E1F3-test-report-${{ github.run_number }}
+          name: SmartSkin-P08E1F4-test-report-${{ github.run_number }}
           path: |
             tests/SmartSkin.Core.Tests/TestResults/*.trx
             artifacts/installer-test.log
@@ -88,7 +88,7 @@ jobs:
       - name: Upload Rhino field-test package
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P08E1F3-${{ github.run_number }}-${{ github.sha }}
+          name: SmartSkin-P08E1F4-${{ github.run_number }}-${{ github.sha }}
           path: ${{ steps.package.outputs.artifact_path }}
           if-no-files-found: error
           compression-level: 0

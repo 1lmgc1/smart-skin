@@ -270,8 +270,10 @@ class NativeTrim:
     def __init__(self,face,edge):self.Face,self.Edge=face,edge
     @property
     def Domain(self):return self.Edge.Domain
+    def IsReversed(self):return False
     def ClosestPoint(self,point):return self.Edge.ClosestPoint(point)
     def PointAt(self,t):return self.Edge.PointAt(t)
+    def TangentAt(self,t):return self.Edge.TangentAt(t)
 
 
 class NativeBrep:
@@ -490,10 +492,10 @@ class RepresentationTests(unittest.TestCase):
 
 
 def captured_side():
-    return dict(schema='native-trim-side-v1',face_index=0,trim_index=1,
+    return dict(schema='native-trim-side-v1',face_index=0,trim_index=1,trim_reversed=False,
                 face_orientation_reversed=False,edge_inward_cross_sign=1.,corners=[
                     dict(edge_end=0,uv=[0.,0.],exterior_wedge=dict(start_ray=[-1.,0.,0.],sweep_radians=1.5*math.pi,oriented_normal=[0.,0.,1.])),
-                    dict(edge_end=1,uv=[0.,1.],adjacent_trim_index=3,adjacent_inward_conormal=[0.,-1.,0.],exterior_wedge=dict(start_ray=[0.,-1.,0.],sweep_radians=1.5*math.pi,oriented_normal=[0.,0.,1.]))])
+                    dict(edge_end=1,uv=[0.,1.],frame_contract='separate-edge-trim-v1',adjacent_trim_index=3,adjacent_trim_endpoint=1,adjacent_trim_parameter=0.,adjacent_trim_domain=[-1.,0.],adjacent_trim_inward_cross_sign=-1.,adjacent_inward_conormal=[0.,-1.,0.],exterior_wedge=dict(start_ray=[0.,-1.,0.],sweep_radians=1.5*math.pi,oriented_normal=[0.,0.,1.]))])
 
 
 class NarrowExteriorTests(unittest.TestCase):
@@ -559,6 +561,112 @@ class NarrowExteriorTests(unittest.TestCase):
                                                          CurveCurve=NativeIntersector.CurveCurve,CurveBrep=NativeIntersector.CurveBrep)
         with self.assertRaisesRegex(n.SeparationError,'FORBIDDEN'):
             n.screen_native_owners([patch],context,ledger([contact(key='owner:1')]))
+
+
+class PolynomialTopTrim(NativeTrim):
+    """Public C1 piecewise polynomial trim with a tolerance-consistent bend.
+
+    The endpoint remains exactly on its independent straight3Dedge. A small
+    local polynomial produces a nonzero trim/edge tangent angle, without
+    substituting private geometry or inconsistent PointAt/TangentAt mocks.
+    """
+    h=.01
+    endpoint_slope=.002
+    def jet(self,t):
+        if t<=-self.h:return 0.,0.,0.
+        a=self.endpoint_slope/(self.h*self.h)
+        return a*t*(t+self.h)**2,a*(t+self.h)*(3*t+self.h),a*(6*t+4*self.h)
+    def PointAt(self,t):return NativePoint(t,1.+self.jet(t)[0])
+    def TangentAt(self,t):
+        d=self.jet(t)[1];length=math.sqrt(1.+d*d)
+        return NativePoint(1./length,d/length)
+    def ClosestPoint(self,point):
+        t=min(0.,max(-1.,point.X))
+        for unused in range(8):
+            y,d,dd=self.jet(t);error=1.+y-point.Y
+            t=min(0.,max(-1.,t-((t-point.X)+error*d)/(1.+d*d+error*dd)))
+        return True,t
+
+
+class ReversedNativeTrim(NativeTrim):
+    def IsReversed(self):return True
+    def PointAt(self,t):return self.Edge.PointAt(self.Domain.T0+self.Domain.T1-t)
+    def TangentAt(self,t):
+        direction=self.Edge.TangentAt(t);return NativePoint(-direction.X,-direction.Y,-direction.Z)
+    def ClosestPoint(self,point):
+        ok,t=self.Edge.ClosestPoint(point);return ok,self.Domain.T0+self.Domain.T1-t
+
+
+class PairedEdgeTrimFrameTests(unittest.TestCase):
+    def fixture(self):
+        owner=NativeBrep((-1.,0.));adapter=native_adapter()
+        trim=PolynomialTopTrim(owner.Faces[0],owner.Edges[3]);owner.Trims[3]=trim
+        side=captured_side();corner=side['corners'][1]
+        slope=trim.endpoint_slope;length=math.sqrt(1.+slope*slope)
+        corner['adjacent_inward_conormal']=[slope/length,-1./length,0.]
+        corner['exterior_wedge']['sweep_radians']=1.5*math.pi+math.atan(slope)
+        span=n.SelectedSpan('owner:1',1,(0.,1.),json.dumps(side))
+        point_contact=dict(surface_index=0,generated_uv=[0.,1.],source_key='owner:1',native_parameter=1.)
+        return owner,adapter,trim,side,span,point_contact
+    def classify(self,owner,adapter,span,point_contact):
+        return adapter.owner_witness_clearance(NativePoint(-.0001,1.0001),owner,[],[(span,point_contact)],.001,n._Budget(n.ScreenLimits()))[1]
+    def test_actual_trim_frame_accepts_tolerance_consistent_endpoint_tangent_difference(self):
+        owner,adapter,trim,side,span,point_contact=self.fixture()
+        self.assertEqual(xyz(trim.PointAt(0.)),xyz(owner.Edges[3].PointAt(0.)))
+        self.assertLess(abs(trim.jet(-trim.h/3.)[0]),.001*.05)
+        # The previous mixed-frame near-unit comparison would fail.
+        self.assertLess(abs(side['corners'][1]['adjacent_inward_conormal'][1]),1.-1e-8)
+        self.assertEqual(self.classify(owner,adapter,span,point_contact),'adjacent_corner_wedge')
+    def test_exact_edge_conormal_cannot_replace_actual_trim_occupancy_frame(self):
+        owner,adapter,trim,side,span,point_contact=self.fixture()
+        side['corners'][1]['adjacent_inward_conormal']=[0.,-1.,0.]
+        span=n.SelectedSpan('owner:1',1,(0.,1.),json.dumps(side))
+        self.assertIsNone(self.classify(owner,adapter,span,point_contact))
+    def test_adjacent_trim_sign_domain_endpoint_and_contract_are_required(self):
+        for key,value in [('adjacent_trim_inward_cross_sign',1.),('adjacent_trim_parameter',-1.),
+                          ('adjacent_trim_endpoint',0),('adjacent_trim_domain',[-2.,0.]),
+                          ('frame_contract','mixed-frames')]:
+            owner,adapter,trim,side,span,point_contact=self.fixture()
+            side['corners'][1][key]=value;span=n.SelectedSpan('owner:1',1,(0.,1.),json.dumps(side))
+            self.assertIsNone(self.classify(owner,adapter,span,point_contact),key)
+    def test_current_trim_frame_is_rechecked_not_replaced_by_endpoint_frame(self):
+        owner,adapter,trim,side,span,point_contact=self.fixture();original=trim.TangentAt
+        def changed(t):
+            p=original(t);return p if t==0. else NativePoint(-p.X,-p.Y,-p.Z)
+        trim.TangentAt=changed
+        self.assertIsNone(self.classify(owner,adapter,span,point_contact))
+    def test_smooth_occupancy_origin_is_actual_trim_not_offset_exact_edge(self):
+        owner=NativeBrep((-1.,0.));adapter=native_adapter();trim=owner.Trims[1]
+        shift=1e-5
+        trim.PointAt=lambda t:NativePoint(shift,t)
+        # The underlying plane extends beyond its trimmed region.
+        owner.Faces[0].Domain=lambda axis:NativeInterval(-1.,1.) if axis==0 else NativeInterval(0.,1.)
+        span=n.SelectedSpan('owner:1',1,(0.,1.),json.dumps(captured_side()))
+        for x,expected in ((shift*.5,None),(shift,None),(shift*2.,'edge_conormal')):
+            result=adapter.owner_witness_clearance(NativePoint(x,.5),owner,[(span,contact(key='owner:1'))],[],.001,n._Budget(n.ScreenLimits()))
+            self.assertEqual(result[1],expected)
+    def test_adjacent_occupancy_origin_is_current_actual_trim_point(self):
+        owner,adapter,trim,side,span,point_contact=self.fixture()
+        x=-.0001;offset=trim.jet(x)[0]
+        # The native3Dedge and actual surface trim need not have the same
+        # point within their existing representation tolerance. Simulate a
+        # native closest result anchored to its3Dedge, as the contract allows.
+        original=owner.ClosestPoint
+        def edge_anchor(point,maximum):
+            return True,NativePoint(x,1.),SimpleNamespace(ComponentIndexType='BrepEdge',Index=3),x,0.,NativePoint(1,0)
+        owner.ClosestPoint=edge_anchor
+        result=adapter.owner_witness_clearance(NativePoint(x,1.+offset*.5),owner,[],[(span,point_contact)],.001,n._Budget(n.ScreenLimits()))
+        self.assertEqual(result[1],'adjacent_corner_wedge')
+        result=adapter.owner_witness_clearance(NativePoint(x,1.+offset*1.5),owner,[],[(span,point_contact)],.001,n._Budget(n.ScreenLimits()))
+        self.assertIsNone(result[1])
+    def test_smooth_occupancy_respects_captured_and_live_trim_reversal(self):
+        owner=NativeBrep((-1.,0.));adapter=native_adapter();owner.Trims[1]=ReversedNativeTrim(owner.Faces[0],owner.Edges[1])
+        side=captured_side();side['trim_reversed']=True
+        span=n.SelectedSpan('owner:1',1,(0.,1.),json.dumps(side))
+        result=adapter.owner_witness_clearance(NativePoint(.00001,.5),owner,[(span,contact(key='owner:1'))],[],.001,n._Budget(n.ScreenLimits()))
+        self.assertEqual(result[1],'edge_conormal')
+        side['trim_reversed']=False;span=n.SelectedSpan('owner:1',1,(0.,1.),json.dumps(side))
+        self.assertIsNone(adapter.owner_witness_clearance(NativePoint(.00001,.5),owner,[(span,contact(key='owner:1'))],[],.001,n._Budget(n.ScreenLimits()))[1])
 
 
 if __name__ == '__main__': unittest.main()

@@ -431,7 +431,7 @@ class RhinoAdapter:
             _fail('OWNER_SCREEN_SIDE_EVIDENCE', 'A captured/native side vector is singular.')
         return tuple(v / length for v in values)
 
-    def _native_trim_uv(self, face, trim, point, budget):
+    def _native_trim_location(self, face, trim, point, budget):
         """Locate this exact trim; approximate surface UV is only a seed."""
         mapped = budget.call(face.ClosestPoint, point)
         if not isinstance(mapped, (tuple, list)) or len(mapped) != 3 or mapped[0] is not True:
@@ -447,7 +447,16 @@ class RhinoAdapter:
         if not domain[0] <= float(trim_parameter[1]) <= domain[1]:
             _fail('OWNER_SCREEN_NATIVE_FAILURE', 'The native trim mapping escaped its finite domain.')
         uv = self._point(budget.call(trim.PointAt, float(trim_parameter[1])))[:2]
-        return uv
+        return uv, float(trim_parameter[1])
+
+    def _native_trim_uv(self, face, trim, point, budget):
+        return self._native_trim_location(face, trim, point, budget)[0]
+
+    def _mapped_trim_tangent(self, trim, parameter, derivatives, budget):
+        """Actual trim occupancy uses J*Tuv, never the separate 3D edge T."""
+        tangent = self._point(budget.call(trim.TangentAt, parameter))
+        su, sv = self._point(derivatives[0]), self._point(derivatives[1])
+        return self._unit(tuple(tangent[0]*a + tangent[1]*b for a,b in zip(su,sv)))
 
     def _exterior_at_selected_edge(self, point, closest, owner, span, parameter, tolerance, budget):
         """Classify boundary Voronoi proximity, never an intersection event.
@@ -475,7 +484,9 @@ class RhinoAdapter:
         captured_trim = owner.Trims[trim_index]
         if (captured_trim.Edge is None or int(captured_trim.Edge.EdgeIndex) != span.edge_index or
                 int(captured_trim.Face.FaceIndex) != face_index or
-                bool(face.OrientationIsReversed) != evidence['face_orientation_reversed']):
+                bool(face.OrientationIsReversed) != evidence['face_orientation_reversed'] or
+                type(evidence.get('trim_reversed')) is not bool or
+                bool(captured_trim.IsReversed()) != evidence['trim_reversed']):
             return None
         domain = self._domain(edge.Domain)
         if not domain[0] <= parameter <= domain[1]:
@@ -495,7 +506,7 @@ class RhinoAdapter:
             corner = corners[0]
             uv = corner.get('uv')
         else:
-            uv = self._native_trim_uv(face, captured_trim, closest, budget)
+            uv, trim_parameter = self._native_trim_location(face, captured_trim, closest, budget)
         if not isinstance(uv, (tuple, list)) or len(uv) != 2 or not all(_finite(v) for v in uv):
             return None
         # Both branches use the exact owning trim: the captured endpoint UV,
@@ -506,6 +517,13 @@ class RhinoAdapter:
                 evaluation[0] is not True or evaluation[2] is None or len(evaluation[2]) < 2):
             _fail('OWNER_SCREEN_NATIVE_FAILURE', 'Native selected-boundary derivatives are unavailable.')
         if math.dist(self._point(evaluation[1]), q) > max(tolerance * .05, resolution):
+            return None
+        # The exact 3D edge anchors distance/contact. The actual trim anchors
+        # occupancy. A tolerance-sized representation offset must not make
+        # an actual trim-interior point appear exterior to the edge frame.
+        occupancy_origin = self._point(evaluation[1])
+        delta = tuple(a-b for a,b in zip(p, occupancy_origin))
+        if math.sqrt(self._dot(delta, delta)) <= resolution:
             return None
         normal = self._unit(self._cross(self._point(evaluation[2][0]), self._point(evaluation[2][1])))
         if face.OrientationIsReversed:
@@ -527,9 +545,16 @@ class RhinoAdapter:
             direction = self._unit(projection)
             angle = math.atan2(self._dot(normal, self._cross(start, direction)), self._dot(start, direction)) % (2.*math.pi)
             return 'corner_wedge' if 1e-8 < angle < sweep-1e-8 else None
-        tangent = self._unit(self._point(budget.call(edge.TangentAt, parameter)))
+        # Physical source attachment stays on the exact 3D edge. Occupancy is
+        # determined by the actual trim tangent; branch checks retain the
+        # existing capture thresholds and cannot relax G0/G1/G2 acceptance.
+        edge_tangent = self._unit(self._point(budget.call(edge.TangentAt, parameter)))
+        tangent = self._mapped_trim_tangent(captured_trim, trim_parameter, evaluation[2], budget)
+        traversal = -1. if evidence['trim_reversed'] else 1.
+        if traversal*self._dot(tangent, edge_tangent) < .99999 or abs(self._dot(normal, edge_tangent)) > 1e-5:
+            return None
         inward = self._unit(self._cross(normal, tangent))
-        inward = tuple(float(evidence['edge_inward_cross_sign'])*v for v in inward)
+        inward = tuple(traversal*float(evidence['edge_inward_cross_sign'])*v for v in inward)
         outward_distance = -self._dot(delta, inward)
         return 'edge_conormal' if outward_distance > resolution and outward_distance / math.sqrt(self._dot(delta, delta)) > 1e-8 else None
 
@@ -612,6 +637,8 @@ class RhinoAdapter:
         if len(corners) != 1:
             return False
         corner = corners[0]; trim_index = corner.get('adjacent_trim_index')
+        if corner.get('frame_contract') != 'separate-edge-trim-v1':
+            return False
         if type(trim_index) is not int or not 0 <= trim_index < owner.Trims.Count:
             return False
         trim = owner.Trims[trim_index]; edge = trim.Edge
@@ -640,7 +667,7 @@ class RhinoAdapter:
         vertex = budget.call(selected.PointAt, parameter)
         if self._exterior_at_selected_edge(point, vertex, owner, span, parameter, tolerance, budget) != 'corner_wedge':
             return False
-        u, v = self._native_trim_uv(face, trim, q, budget)
+        (u, v), trim_parameter = self._native_trim_location(face, trim, q, budget)
         values = budget.call(face.Evaluate, u, v, 1)
         if (not isinstance(values, (tuple, list)) or len(values) != 3 or values[0] is not True or
                 values[2] is None or len(values[2]) < 2):
@@ -649,22 +676,46 @@ class RhinoAdapter:
         resolution = 128.*math.ulp(max(1., *(abs(x) for x in p + nearest + origin)))
         if math.dist(self._point(values[1]), nearest) > max(tolerance*.05, resolution):
             return False
-        endpoints = [a for a in adjacent_domain if math.dist(self._point(budget.call(edge.PointAt, a)), origin) <= max(tolerance*.05, resolution)]
-        if len(endpoints) != 1:
+        # Exact 3D edge geometry remains the contact/proximity anchor. The
+        # occupied face side is a different frame: its actual 2D BrepTrim,
+        # pushed through the owner Jacobian. Mixing the two tangents can
+        # reject valid tolerance-consistent native trims at their endpoints.
+        trim_domain = self._domain(trim.Domain)
+        trim_end = corner.get('adjacent_trim_endpoint')
+        endpoint_parameter = corner.get('adjacent_trim_parameter')
+        sign = corner.get('adjacent_trim_inward_cross_sign')
+        if (type(trim_end) is not int or trim_end not in (0, 1) or sign not in (-1., 1.) or
+                not _finite(endpoint_parameter) or endpoint_parameter != trim_domain[trim_end] or
+                not isinstance(corner.get('adjacent_trim_domain'), (tuple, list)) or
+                tuple(corner['adjacent_trim_domain']) != trim_domain):
+            return False
+        endpoint_uv = self._point(budget.call(trim.PointAt, endpoint_parameter))[:2]
+        endpoint_values = budget.call(face.Evaluate, *endpoint_uv, 1)
+        if (not isinstance(endpoint_values, (tuple, list)) or len(endpoint_values) != 3 or
+                endpoint_values[0] is not True or endpoint_values[2] is None or len(endpoint_values[2]) < 2):
+            _fail('OWNER_SCREEN_NATIVE_FAILURE', 'Adjacent trim endpoint derivatives are unavailable.')
+        if math.dist(self._point(endpoint_values[1]), origin) > max(tolerance*.05, resolution):
             return False
         captured_normal = self._unit(corner['exterior_wedge'].get('oriented_normal'))
         captured_inward = self._unit(corner.get('adjacent_inward_conormal'))
-        tangent_at_vertex = self._unit(self._point(budget.call(edge.TangentAt, endpoints[0])))
-        alignment = self._dot(captured_inward, self._unit(self._cross(captured_normal, tangent_at_vertex)))
-        if abs(alignment) < 1.-1e-8:
+        endpoint_normal = self._unit(self._cross(self._point(endpoint_values[2][0]), self._point(endpoint_values[2][1])))
+        if face.OrientationIsReversed:
+            endpoint_normal = tuple(-x for x in endpoint_normal)
+        if self._dot(endpoint_normal, captured_normal) < 1.-1e-8:
+            return False
+        tangent_at_vertex = self._mapped_trim_tangent(trim, endpoint_parameter, endpoint_values[2], budget)
+        endpoint_inward = tuple(float(sign)*x for x in self._unit(self._cross(endpoint_normal, tangent_at_vertex)))
+        if self._dot(captured_inward, endpoint_inward) < 1.-1e-8:
             return False
         normal = self._unit(self._cross(self._point(values[2][0]), self._point(values[2][1])))
         if face.OrientationIsReversed:
             normal = tuple(-x for x in normal)
-        tangent = self._unit(self._point(budget.call(edge.TangentAt, t)))
+        tangent = self._mapped_trim_tangent(trim, trim_parameter, values[2], budget)
         inward = self._unit(self._cross(normal, tangent))
-        inward = tuple((1. if alignment > 0 else -1.)*x for x in inward)
-        delta = tuple(a-b for a,b in zip(p,nearest))
+        inward = tuple(float(sign)*x for x in inward)
+        delta = tuple(a-b for a,b in zip(p,self._point(values[1])))
+        if math.sqrt(self._dot(delta,delta)) <= resolution:
+            return False
         outward = -self._dot(delta, inward)
         return outward > resolution and outward/math.sqrt(self._dot(delta,delta)) > 1e-8
 

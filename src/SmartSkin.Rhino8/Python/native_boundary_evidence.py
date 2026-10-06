@@ -101,6 +101,8 @@ def _probes(witness,normal,inward,tol,surface,classification_tolerance,corner=Fa
         _close(wedge.get('oriented_normal'),normal,1e-5,'Exterior wedge has the wrong parent orientation.')
         ray=_unit(witness.get('trim_ray'),'native corner ray');adjacent=_unit(witness.get('adjacent_ray'),'adjacent native trim ray')
         angle=math.atan2(float(adjacent@np.cross(normal,ray)),float(adjacent@ray))%(2.*math.pi)
+        _close(witness.get('trim_inward_conormal'),(1. if a=='Interior' else -1.)*np.cross(normal,ray),
+               1e-5,'Actual trim co-normal contradicts corner membership.')
         _close(start,adjacent if a=='Interior' else ray,1e-5,'Exterior wedge does not start on the actual corner ray.')
         _close(witness.get('adjacent_inward_conormal'),(-1. if a=='Interior' else 1.)*np.cross(normal,adjacent),
                1e-5,'Adjacent native trim co-normal contradicts corner membership.')
@@ -155,17 +157,41 @@ def _make_record(edge,reverse,tolerance,curve_factory,surface_factory,cancelled)
         tangent=np.asarray(curve(parameter,1));length=np.linalg.norm(tangent)
         if length<=0.:_fail('Singular native edge tangent.')
         tangent/=length
-        if abs(float(normal@tangent))>1e-5 or abs(float(normal@inward))>1e-5 or abs(float(inward@tangent))>1e-5:
-            _fail('Native owner frame is not orthogonal.')
+        edge_normal=abs(float(normal@tangent));inward_normal=abs(float(normal@inward));own_frame=abs(float(inward@tangent))
+        location=('endpoint=%d' % end) if corner else ('station=%d' % (i+1))
+        if edge_normal>1e-5 or inward_normal>1e-5 or own_frame>1e-5:
+            _fail('Native edge frame is not orthogonal: %s; edge_normal=%.9g; inward_normal=%.9g; own_frame=%.9g; limit=1e-5.' %
+                  (location,edge_normal,inward_normal,own_frame))
         if w.get('edge_inward_cross_sign')!=sign or float(inward@np.cross(normal,tangent))*sign<1.-1e-5:
             _fail('Native owner side contradicts edge traversal.')
         if corner:
-            _close(w.get('trim_ray'),tangent*(1. if end==0 else -1.),1e-5,'Corner trim ray does not follow the original native edge.')
+            if w.get('frame_contract')!='separate-edge-trim-v1':_fail('Missing distinct native edge and trim corner frames.')
+            _close(w.get('tangent'),tangent,1e-5,'Captured corner edge tangent disagrees with its exact original edge.')
+            ray=_unit(w.get('trim_ray'),'actual native trim ray')
+            trim_inward=_unit(w.get('trim_inward_conormal'),'actual trim inward co-normal')
+            _close(w.get('trim_outward_conormal'),-trim_inward,1e-5,'Actual trim outward co-normal is inconsistent.')
+            trim_normal=abs(float(ray@normal));trim_own=max(abs(float(trim_inward@ray)),abs(float(trim_inward@normal)))
+            alignment=float(ray@(tangent*(1. if end==0 else -1.)))
+            if trim_normal>1e-5 or trim_own>1e-5 or alignment<.99999:
+                _fail('Native corner branch/frame mismatch: endpoint=%d; edge_normal=%.9g; trim_normal=%.9g; branch_dot=%.12g; own_frame=%.9g; min_branch_dot=.99999; max_frame=1e-5.' %
+                      (end,edge_normal,trim_normal,alignment,trim_own))
+            _close(w.get('edge_trim_tangent_alignment'),alignment,1e-10,'Captured trim/edge branch alignment was changed.')
+            measured_angle=math.degrees(math.acos(max(-1.,min(1.,alignment))))
+            _close(w.get('edge_trim_tangent_angle_degrees'),measured_angle,1e-5,'Captured trim/edge angle diagnostic was changed.')
+            _close(w.get('edge_tangent_normal_residual'),edge_normal,1e-8,'Captured edge/normal diagnostic was changed.')
             if type(w.get('trim_at_start')) is not bool or w['trim_at_start']!=((end==0)!=owner['trim_reversed']):
                 _fail('Corner does not preserve original trim/edge traversal.')
             adjacent=_unit(w.get('adjacent_ray'),'adjacent native trim ray')
             if abs(float(adjacent@normal))>1e-5 or type(w.get('adjacent_trim_index')) is not int:
                 _fail('Missing adjacent native trim provenance.')
+            adjacent_end=w.get('adjacent_trim_endpoint');adjacent_domain=_array(w.get('adjacent_trim_domain'),(2,),'adjacent native trim domain')
+            if type(adjacent_end) is not int or adjacent_end!=(1 if w['trim_at_start'] else 0) or adjacent_domain[1]<=adjacent_domain[0]:
+                _fail('Adjacent trim endpoint provenance is inconsistent.')
+            _close(w.get('adjacent_trim_parameter'),adjacent_domain[adjacent_end],1e-12,'Adjacent trim endpoint parameter changed.')
+            adjacent_sign=w.get('adjacent_trim_inward_cross_sign')
+            if adjacent_sign not in (-1.,1.):_fail('Missing actual adjacent trim inward sign.')
+            _close(w.get('adjacent_inward_conormal'),adjacent_sign*np.cross(normal,adjacent*(-1. if adjacent_end else 1.)),
+                   1e-5,'Actual adjacent trim sign disagrees with its own tangent frame.')
         else:_close(w.get('tangent'),tangent,1e-5,'Captured native tangent disagrees with its exact edge.')
         _probes(w,normal,inward,position_tol,surface,w.get('classification_tolerance',owner.get('classification_tolerance')),corner)
         ref=_reference(surface,w.get('uv'),point,normal,position_tol)
@@ -213,8 +239,10 @@ def _build_source_boundaries(role_chains,tolerance,curve_factory,surface_factory
     for role,chain in role_chains.items():
         if not 1<=len(chain)<=16 or (role.startswith('side') and len(chain)!=1):_fail('Unsupported native role edge count.')
         records=[]
-        for edge,reverse in chain:
-            record=_make_record(edge,reverse,tolerance,curve_factory,surface_factory,cancelled)
+        for source_ordinal,(edge,reverse) in enumerate(chain):
+            try:record=_make_record(edge,reverse,tolerance,curve_factory,surface_factory,cancelled)
+            except BoundaryEvidenceError as error:
+                _fail('role=%s; source_ordinal=%d; %s' % (role,source_ordinal,str(error)))
             if role.startswith('side'):
                 mapping=(side_maps or {}).get(role)
                 if not isinstance(mapping,dict):_fail('Missing exact side-chart/native parameter map.')

@@ -1,6 +1,8 @@
-# Smart Skin — P08E1F3 experimental field candidate
+# Smart Skin — P08E1F4 experimental field candidate
 
-Rhino8.21+ / Windows. Version **0.0.17-p08e1f3**.
+Rhino8.21+ / Windows. Version **0.0.18-p08e1f4**.
+
+F4 repairs the native corner-frame evidence contract after the F3 field capture failure. See [native frame repair](docs/P08E1F4_NATIVE_FRAME_REPAIR.md). F3 skin construction, selected U/V controls and acceptance tolerances are retained.
 
 This experimental field candidate repairs compound-edge recognition and constructs a boundary-preserving native skin with selectable U/V guide handles. Original source objects remain unchanged. Upper source corners may be hard at the two explicitly identified vertices; finite source intervals and generated joins receive no continuity exemption. Whole-skin numerical construction, selected-handle regressions and the bounded cap-cap screen pass. The actual Rhino owner-screen and interactive workflow remain a field-test boundary. Delivery requires successful exact-SHA Windows CI and its unchanged verified install ZIP.
 

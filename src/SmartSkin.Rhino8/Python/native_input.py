@@ -176,6 +176,21 @@ def _trim_ray(trim,at_start,jac,budget):
     return _unit_side(direction if at_start else -direction)
 
 
+def _corner_edge_frame(normal,trim_ray,edge_tangent,edge_end):
+    """Keep exact edge attachment and actual trim occupancy frames distinct."""
+    normal=_unit_side(normal);ray=_unit_side(trim_ray);tangent=_unit_side(edge_tangent)
+    edge_ray=tangent*(1. if edge_end==0 else -1.)
+    alignment=float(ray@edge_ray);edge_normal=abs(float(tangent@normal));trim_normal=abs(float(ray@normal))
+    # Same limits already used for smooth native edge/trim branch capture.
+    # Positional tolerance is not proof of identical endpoint derivatives.
+    if alignment<.99999 or edge_normal>1e-5 or trim_normal>1e-5:
+        _side_fail('Corner branch mismatch: endpoint=%d; edge_normal=%.9g; trim_normal=%.9g; branch_dot=%.12g; min_branch_dot=.99999; max_normal=1e-5.' %
+                   (edge_end,edge_normal,trim_normal,alignment))
+    return dict(tangent=tangent,conormal=_unit_side(np.cross(normal,tangent)),
+                alignment=alignment,angle_degrees=math.degrees(math.acos(max(-1.,min(1.,alignment)))),
+                edge_normal=edge_normal,trim_normal=trim_normal)
+
+
 def _corner_side(edge,trim,face,edge_end,maximum,tolerance,mapping_tolerance,budget):
     loop=trim.Loop
     if loop is None or loop.Trims.Count<2 or loop.Trims.Count>256:
@@ -209,6 +224,10 @@ def _corner_side(edge,trim,face,edge_end,maximum,tolerance,mapping_tolerance,bud
     ray=_trim_ray(trim,at_start,frame[1],budget)
     adjacent_ray=_trim_ray(adjacent,not at_start,frame[1],budget)
     normal=frame[3];cross_ray=_unit_side(np.cross(normal,ray))
+    budget.check()
+    edge_tangent=_unit_side(_xyz(edge.TangentAt(float(edge.Domain.T0 if edge_end==0 else edge.Domain.T1))))
+    edge_frame=_corner_edge_frame(normal,ray,edge_tangent,edge_end)
+    alignment=edge_frame['alignment'];edge_normal=edge_frame['edge_normal'];alignment_angle=edge_frame['angle_degrees']
     angle=math.atan2(float(adjacent_ray@cross_ray),float(adjacent_ray@ray))%(2.*math.pi)
     if min(angle,2.*math.pi-angle)<1e-5:_side_fail('The actual corner rays are coincident or unresolved.')
     maximum=min(maximum,adjacent_length*.01)
@@ -221,13 +240,26 @@ def _corner_side(edge,trim,face,edge_end,maximum,tolerance,mapping_tolerance,bud
         if set((first,second))!=set(('Interior','Exterior')):continue
         if relations!=[first]*3+[second]*3+[first]*3+[second]*3:continue
         first_inside=first=='Interior'
-        inward=cross_ray if first_inside else -cross_ray
+        trim_inward=cross_ray if first_inside else -cross_ray
+        edge_sign=float((1. if first_inside else -1.)*(1. if edge_end==0 else -1.))
+        inward=edge_sign*edge_frame['conormal']
+        adjacent_endpoint=1 if at_start else 0
+        adjacent_parameter=float(adjacent.Domain.T1 if adjacent_endpoint else adjacent.Domain.T0)
         adjacent_inward=-np.cross(normal,adjacent_ray) if first_inside else np.cross(normal,adjacent_ray)
+        adjacent_increasing=adjacent_ray*(-1. if adjacent_endpoint else 1.)
+        adjacent_sign=float(np.sign(adjacent_inward@np.cross(normal,adjacent_increasing)))
         start=adjacent_ray if first_inside else ray
         sweep=2.*math.pi-angle if first_inside else angle
         return dict(edge_end=int(edge_end),trim_at_start=bool(at_start),point=p.tolist(),uv=uv.tolist(),trim_ray=ray.tolist(),
-                    classification_tolerance=float(tolerance),edge_inward_cross_sign=float((1. if first_inside else -1.)*(1. if edge_end==0 else -1.)),
+                    frame_contract='separate-edge-trim-v1',tangent=edge_tangent.tolist(),
+                    trim_inward_conormal=trim_inward.tolist(),trim_outward_conormal=(-trim_inward).tolist(),
+                    edge_trim_tangent_alignment=alignment,edge_trim_tangent_angle_degrees=alignment_angle,
+                    edge_tangent_normal_residual=edge_normal,
+                    classification_tolerance=float(tolerance),edge_inward_cross_sign=edge_sign,
                     adjacent_trim_index=int(adjacent.TrimIndex),adjacent_ray=adjacent_ray.tolist(),
+                    adjacent_trim_endpoint=adjacent_endpoint,adjacent_trim_parameter=adjacent_parameter,
+                    adjacent_trim_domain=[float(adjacent.Domain.T0),float(adjacent.Domain.T1)],
+                    adjacent_trim_inward_cross_sign=adjacent_sign,
                     oriented_normal=normal.tolist(),inward_conormal=inward.tolist(),
                     outward_conormal=(-inward).tolist(),adjacent_inward_conormal=_unit_side(adjacent_inward).tolist(),
                     exterior_wedge=dict(start_ray=start.tolist(),sweep_radians=float(sweep),oriented_normal=normal.tolist()),

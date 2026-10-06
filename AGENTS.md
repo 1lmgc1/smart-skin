@@ -71,3 +71,9 @@ dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --
 - A regular lower corner whose native parent operators are incompatible with the fixed tolerance must fail with a named diagnosis before construction. It must not silently receive a hard-point exception.
 - Every edited result needs fresh geometry/attachment/shared-join/symmetry evidence. The commit helper must recheck that evidence and the exact current request before every native addition, with rollback on reentrant edits or source changes.
 - Do not change P08E1F2 installer behavior, token policy or verified delivery pipeline. Explicit selected naked-edge scope remains; group/whole-surface opening discovery is a separate unresolved design task.
+
+## P08E1F4 native corner-frame evidence repair
+
+- Version `0.0.18-p08e1f4` separates the exact selected 3D-edge attachment frame from the native 2D-trim push-forward frame used to identify the occupied corner wedge. Do not demand cross-representation orthogonality or silently discard native trim provenance.
+- Retain exact original source data, physical G0/G1/G2 gates, sidedness/contact rules, F3 constructed geometry and selected U/V behavior. Reject ambiguous frame correspondence with scalar diagnostics.
+- Preserve the F2 installer and exact-SHA Windows CI delivery pipeline. Native host behavior remains subject to a fresh field test.

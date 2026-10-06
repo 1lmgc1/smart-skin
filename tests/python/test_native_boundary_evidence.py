@@ -7,6 +7,9 @@ import copy
 import pathlib
 import sys
 import unittest
+from types import SimpleNamespace
+from scipy.integrate import quad
+from scipy.optimize import brentq
 from unittest import mock
 import numpy as np
 
@@ -16,7 +19,7 @@ from native_boundary_evidence import (build_source_boundaries,require_complete_e
 from native_family import (Curve,Surface,build_spec,require_native_provenance,
                            UnsupportedFamily,_source_side_map)
 from native_input import Capture
-from test_native_attachment_side import Face,CurvedFace,Loop,Domain,capture
+from test_native_attachment_side import Face,CurvedFace,Loop,Domain,Point,capture
 from test_native_family import synthetic_edges
 
 
@@ -56,7 +59,76 @@ def model(records):
     return dict(source_boundaries=records,absolute_tolerance=1e-5,extraction_report=dict(source_edge_count=4))
 
 
+def approximate_edge_inputs(epsilon=2e-4,reverse=False,normal_bow=False):
+    """Explicit synthetic Brep-style approximation, no private field geometry.
+
+    The true trim stays straight. Its separately stored 3D edge has matching
+    endpoints and a small in-plane quadratic bow, within the position budget.
+    Arc stations use numerical integration of this exact synthetic polynomial.
+    """
+    edges,roles,maps=inputs();polygon=np.array([[0,0],[2,0],[2,2],[0,2]],float)
+    face=Face(polygon,domains=[Domain(0,2),Domain(0,2)]);trim=Loop(polygon,face).Trims[0]
+    class ApproximateEdge:
+        Domain=Domain(-7,3);reversed=reverse
+        def PointAt(self,t):
+            f=(t+7.)/10.;f=1.-f if self.reversed else f
+            bow=epsilon*f*(1.-f)
+            return Point(2.*f,0. if normal_bow else bow,bow if normal_bow else 0.)
+        def TangentAt(self,t):
+            f=(t+7.)/10.;f=1.-f if self.reversed else f
+            result=np.array([2.,0. if normal_bow else epsilon*(1.-2.*f),epsilon*(1.-2.*f) if normal_bow else 0.])
+            return Point(*(-result if self.reversed else result))
+        def GetLength(self):return quad(lambda f:np.hypot(2.,epsilon*(1.-2.*f)),0.,1.,epsabs=1e-13)[0]
+        def NormalizedLengthParameter(self,fraction):
+            total=self.GetLength()
+            f=brentq(lambda t:quad(lambda f:np.hypot(2.,epsilon*(1.-2.*f)),0.,t,epsabs=1e-13)[0]-fraction*total,0.,1.,xtol=1e-14)
+            return True,self.Domain.ParameterAt(f)
+    trim.Edge=ApproximateEdge()
+    cp=[[0,0,0,1],[1,0. if normal_bow else epsilon/2.,epsilon/2. if normal_bow else 0.,1],[2,0,0,1]]
+    edges[0]['curve']=dict(degree=2,knots=[-7]*3+[3]*3,domain=[-7,3],homogeneous_cp=cp[::-1] if reverse else cp)
+    edges[0]['owner_side']=capture(face,trim,trim.Edge,tolerance=.01)
+    roles['lower']=[(edges[0],reverse)]
+    return edges,roles,maps
+
+
 class NativeBoundaryEvidenceTests(unittest.TestCase):
+    def test_native_approximation_preserves_distinct_frames_through_capture(self):
+        for reverse in (False,True):
+            edges,roles,maps=approximate_edge_inputs(reverse=reverse);before=copy.deepcopy(edges)
+            result=build_source_boundaries(roles,.01,Curve,Surface,maps)
+            spec=model(result);spec['absolute_tolerance']=.01
+            captured=Capture(SimpleNamespace(RuntimeSerialNumber=1),spec,[],None,[])
+            self.assertIs(captured.model,spec)
+            self.assertEqual(edges,before)
+            for corner in result['roles']['lower'][0]['owner_side']['corners']:
+                self.assertEqual(corner['frame_contract'],'separate-edge-trim-v1')
+                self.assertLess(abs(np.dot(corner['inward_conormal'],corner['tangent'])),1e-12)
+                self.assertLess(abs(np.dot(corner['trim_inward_conormal'],corner['trim_ray'])),1e-12)
+                # This valid native representation difference caused the F3
+                # mixed-frame orthogonality failure. Neither frame is erased.
+                self.assertGreater(abs(np.dot(corner['trim_inward_conormal'],corner['tangent'])),1e-5)
+                self.assertGreater(corner['edge_trim_tangent_angle_degrees'],0.)
+                self.assertGreater(corner['edge_trim_tangent_alignment'],.99999)
+            captured.dispose()
+
+    def test_non_tangent_and_incompatible_native_branches_still_fail(self):
+        with self.assertRaisesRegex(UnsupportedFamily,'local branch'):
+            approximate_edge_inputs(normal_bow=True)
+        with self.assertRaises(UnsupportedFamily):approximate_edge_inputs(epsilon=.04)
+        edges,roles,maps=approximate_edge_inputs();corner=edges[0]['owner_side']['corners'][0]
+        corner['trim_ray']=(-np.array(corner['trim_ray'])).tolist()
+        with self.assertRaisesRegex(BoundaryEvidenceError,'role=lower; source_ordinal=0.*endpoint=0.*branch_dot'):
+            build_source_boundaries(roles,.01,Curve,Surface,maps)
+
+    def test_paired_frame_metadata_and_actual_trim_occupancy_cannot_be_forged(self):
+        for mutate in (lambda c:c.update(trim_inward_conormal=c['inward_conormal']),
+                       lambda c:c.update(edge_trim_tangent_alignment=1.),
+                       lambda c:c.update(adjacent_trim_inward_cross_sign=-c['adjacent_trim_inward_cross_sign']),
+                       lambda c:c.update(adjacent_trim_parameter=c['adjacent_trim_parameter']+.1),
+                       lambda c:c.pop('frame_contract')):
+            edges,roles,maps=approximate_edge_inputs();mutate(edges[0]['owner_side']['corners'][0])
+            with self.assertRaises(BoundaryEvidenceError):build_source_boundaries(roles,.01,Curve,Surface,maps)
+
     def test_exact_records_roles_and_ownership_are_retained_without_mutation(self):
         edges,roles,maps=inputs();before=copy.deepcopy(edges);result=evidence(roles,maps)
         self.assertTrue(result['complete']);self.assertEqual(result['source_edge_count'],4)
