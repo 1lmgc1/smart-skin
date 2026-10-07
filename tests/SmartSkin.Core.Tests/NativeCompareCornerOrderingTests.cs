@@ -70,7 +70,7 @@ public sealed class NativeCompareCornerOrderingTests
             {
                 var rotated = splitRecords.Skip(offset).Concat(splitRecords.Take(offset)).ToArray();
                 Assert.Equal(expected, Canonical(rotated, backwards));
-                Assert.Equal(expected, Canonical(rotated.Reverse().ToArray(), backwards));
+                Assert.Equal(expected, Canonical(Enumerable.Reverse(rotated).ToArray(), backwards));
             }
     }
 
@@ -308,7 +308,7 @@ public sealed class NativeCompareCornerOrderingTests
                 (derivative[1] - h[1] / h[3] * derivative[3]) / h[3],
                 (derivative[2] - h[2] / h[3] * derivative[3]) / h[3]);
         }
-        internal RationalBezier Reverse() => new(Controls.Reverse().Select(point => point.ToArray()).ToArray());
+        internal RationalBezier Reverse() => new(Enumerable.Reverse(Controls).Select(point => point.ToArray()).ToArray());
         internal RationalBezier[] Split(double t)
         {
             var row = Controls.Select(point => point.ToArray()).ToArray();
