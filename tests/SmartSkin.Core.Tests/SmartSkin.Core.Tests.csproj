@@ -21,6 +21,9 @@
     <Compile Include="..\..\src\SmartSkin.Rhino8\NativeCompare\NativeCompareCornerOrdering.cs" Link="NativeCompareCornerOrdering.cs" />
     <Compile Include="..\..\src\SmartSkin.Rhino8\NativeCompare\NativeSupportTrimPolicy.cs" Link="NativeSupportTrimPolicy.cs" />
     <Compile Include="..\..\src\SmartSkin.Rhino8\NativeCompare\NativeSeedJoinPolicy.cs" Link="NativeSeedJoinPolicy.cs" />
+    <Compile Include="..\..\src\SmartSkin.Rhino8\NativeBuild\NativeBuildTransaction.cs" Link="NativeBuildTransaction.cs" />
+    <Compile Include="..\..\src\SmartSkin.Rhino8\NativeBuild\NativeBuildCapPolicy.cs" Link="NativeBuildCapPolicy.cs" />
+    <Compile Include="..\..\src\SmartSkin.Rhino8\NativeBuild\NativeBuildController.cs" Link="NativeBuildController.cs" />
     <ProjectReference Include="..\..\src\SmartSkin.Core\SmartSkin.Core.csproj" />
   </ItemGroup>
 </Project>

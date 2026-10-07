@@ -15,7 +15,6 @@ using SmartSkin.Core.Routing;
 
 namespace SmartSkin.Rhino8;
 
-[CommandStyle(Style.ScriptRunner)]
 public sealed class SmartSurfaceBuildCommand : Command
 {
     private static bool _nativeBuildActive;
@@ -24,12 +23,21 @@ public sealed class SmartSurfaceBuildCommand : Command
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
+        if (_nativeBuildActive) return Result.Cancel;
+        if (RhinoApp.Version.CompareTo(new Version(8, 21)) < 0) return Result.Failure;
+        _nativeBuildActive = true;
+        try { return NativeBuildWorkflow.Run(doc, mode); }
+        finally { _nativeBuildActive = false; }
+    }
+
+    internal static Result RunPythonCommand(RhinoDoc doc, RunMode mode)
+    {
         if (_nativeBuildActive)
         {
             RhinoApp.WriteLine("SMARTSKIN_P08E1 BLOCKED | code=PREVIEW_ALREADY_ACTIVE");
             return Result.Cancel;
         }
-        // Keep the existing command/toolbar identity. Rhino 8's supported
+        // Explicit historical Python entry. Rhino 8's supported
         // ScriptEditor runner owns CPython and its pinned package environment.
         // No document object references cross RunScript's command boundary.
         var assemblyDirectory = Path.GetDirectoryName(typeof(SmartSurfaceBuildCommand).Assembly.Location);
@@ -61,7 +69,7 @@ public sealed class SmartSurfaceBuildCommand : Command
     }
 
     // Preserved for historical diagnostics and review. The single visible
-    // toolbar now enters the native FULLCYCLE workflow above, never MatchSrf.
+    // toolbar enters the bounded native seed/Join workflow above.
     internal static Result RunLegacyCommand(RhinoDoc doc, RunMode mode)
     {
         var objectCountBefore = RhinoDocumentMetrics.ActiveObjectCount(doc);

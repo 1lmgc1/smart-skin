@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using SmartSkin.Rhino8;
 using Xunit;
 
@@ -6,6 +7,70 @@ namespace SmartSkin.Core.Tests;
 
 public sealed class NativeSeedJoinPolicyTests
 {
+    private static readonly Guid Seed = new("10000000-0000-0000-0000-000000000001");
+    private static readonly Guid ParentA = new("20000000-0000-0000-0000-000000000002");
+    private static readonly Guid ParentB = new("20000000-0000-0000-0000-000000000003");
+    private static Dictionary<Guid, int> ExpectedFaces() => new() { [Seed] = 0, [ParentA] = 1, [ParentB] = 1 };
+    private static NativeSeedJoinPolicy.FaceEvidence Face(Guid tag, bool unchanged = true) => new(tag, unchanged);
+    private static IReadOnlyList<NativeSeedJoinPolicy.FaceEvidence>[] OneOutput(params NativeSeedJoinPolicy.FaceEvidence[] faces) => new[] { (IReadOnlyList<NativeSeedJoinPolicy.FaceEvidence>)faces };
+
+    [Fact]
+    public void AbsentNativeMapUsesCompleteUniqueUnchangedFaceEvidence()
+    {
+        Assert.True(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(), OneOutput(Face(ParentB), Face(Seed), Face(ParentA)),
+            null, 2, out var contributors));
+        Assert.Equal(new[] { 0, 1 }, Assert.Single(contributors));
+        // Provenance alone cannot certify that the selected seams were joined.
+        Assert.False(NativeSeedJoinPolicy.SampledSelectedOpeningJoined(true, true, 6, 0, 4, 0, 4, 0, 6, 6));
+    }
+
+    [Fact]
+    public void AbsentMapCannotHideMissingOriginalFace()
+    {
+        Assert.False(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(), OneOutput(Face(Seed), Face(ParentA)), null, 2, out _));
+    }
+
+    [Fact]
+    public void AbsentMapCannotHideDuplicateOrUnknownOutputFace()
+    {
+        Assert.False(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(),
+            OneOutput(Face(Seed), Face(ParentA), Face(ParentB), Face(ParentB)), null, 2, out _));
+        Assert.False(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(),
+            OneOutput(Face(Seed), Face(ParentA), Face(ParentB), Face(Guid.Empty)), null, 2, out _));
+        Assert.False(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(),
+            OneOutput(Face(Seed), Face(ParentA), Face(Guid.Empty)), null, 2, out _));
+    }
+
+    [Fact]
+    public void ChangedSupportOrDomainRejectsEvenWithCorroboratingMap()
+    {
+        var faces = OneOutput(Face(Seed), Face(ParentA, false), Face(ParentB));
+        Assert.False(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(), faces, null, 2, out _));
+        Assert.False(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(), faces, new[] { new[] { 0, 1 } }, 2, out _));
+    }
+
+    [Fact]
+    public void SuppliedContradictoryOrMalformedMapCannotFallBackToTags()
+    {
+        var faces = OneOutput(Face(Seed), Face(ParentA), Face(ParentB));
+        Assert.False(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(), faces, new[] { new[] { 1 } }, 2, out _));
+        Assert.False(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(), faces, Array.Empty<int[]>(), 2, out _));
+        Assert.False(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(), faces, new int[][] { null! }, 2, out _));
+        Assert.False(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(), faces, new[] { new[] { 0, 1 }, new[] { 1 } }, 2, out _));
+        Assert.False(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(), faces, new[] { new[] { 0, 1, 1 } }, 2, out _));
+    }
+
+    [Fact]
+    public void MultipleOutputContributorSetsComeFromActualFaceDistribution()
+    {
+        var outputs = new[] { (IReadOnlyList<NativeSeedJoinPolicy.FaceEvidence>)new[] { Face(ParentA), Face(Seed) }, new[] { Face(ParentB) } };
+        Assert.True(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(), outputs, null, 2, out var contributors));
+        Assert.Equal(new[] { 0, 1 }, contributors[0]);
+        Assert.Equal(new[] { 1 }, contributors[1]);
+        Assert.True(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(), outputs, new[] { new[] { 1, 0 }, new[] { 1 } }, 2, out _));
+        Assert.False(NativeSeedJoinPolicy.ResolveFaceProvenance(ExpectedFaces(), outputs, new[] { new[] { 1 }, new[] { 0, 1 } }, 2, out _));
+    }
+
     [Fact]
     public void OrdinarySeamRequiresSeedAndExactParentProvenance()
     {

@@ -181,7 +181,7 @@ public sealed class SmartSkinNativeCompareCommand : Command
             + " | next=ONE_JOIN_WITH_FULL_OWNER_COPIES | later_recipes=NONE");
         NativeCompareMeasure.ReportSides("EdgeSrfSeed", "Seed", seed, input, binding, checkpoint, write);
         AddPreviewCopy("EdgeSrf:Seed:NOT_VERIFIED", seed, candidates);
-        NativeSeedJoinExperiment.Run(seed, input, candidates, checkpoint, write);
+        using var join = NativeSeedJoinExperiment.Run(seed, input, candidates, checkpoint, write);
         if (!input.CopiesUnchanged()) throw new InvalidOperationException("COPIED_NATIVE_TARGET_CHANGED");
     }
 

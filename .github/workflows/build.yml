@@ -1,4 +1,4 @@
-name: build-p08e1n5-native-diagnostic
+name: build-p08e1n6-native-user-test
 
 on:
   push:
@@ -51,7 +51,7 @@ jobs:
       - name: Package field-test artifact
         id: package
         shell: powershell
-        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.26-p08e1n5" -Commit "${{ github.sha }}"
+        run: ./scripts/Package-Artifact.ps1 -Configuration Release -Version "0.0.27-p08e1n6" -Commit "${{ github.sha }}"
       - name: Package integrity and failure helpers
         shell: powershell
         env:
@@ -78,7 +78,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P08E1N5-test-report-${{ github.run_number }}
+          name: SmartSkin-P08E1N6-test-report-${{ github.run_number }}
           path: |
             tests/SmartSkin.Core.Tests/TestResults/*.trx
             artifacts/installer-test.log
@@ -88,7 +88,7 @@ jobs:
       - name: Upload Rhino field-test package
         uses: actions/upload-artifact@v4
         with:
-          name: SmartSkin-P08E1N5-${{ github.run_number }}-${{ github.sha }}
+          name: SmartSkin-P08E1N6-${{ github.run_number }}-${{ github.sha }}
           path: ${{ steps.package.outputs.artifact_path }}
           if-no-files-found: error
           compression-level: 0

@@ -366,7 +366,7 @@ internal sealed class NativeCompareInput : IDisposable
         finally { foreach (var piece in pieces) piece.Dispose(); }
     }
 
-    private string Fingerprint(RhinoObject obj)
+    internal string Fingerprint(RhinoObject obj)
     {
         // Full geometry and attribute archives stay in memory; no source hashes or coordinates are logged.
         using var sha = SHA256.Create();

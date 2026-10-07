@@ -6,6 +6,16 @@ using Rhino.Geometry;
 
 namespace SmartSkin.Rhino8;
 
+internal sealed class NativeSeedJoinResult : IDisposable
+{
+    internal bool ProvenanceResolved;
+    internal bool SelectedOpeningJoined;
+    internal bool TemporariesDisposed;
+    internal string Status = "JOIN_NOT_COMPLETED";
+    internal Brep? Cap;
+    public void Dispose() { Cap?.Dispose(); Cap = null; }
+}
+
 internal static class NativeSeedJoinExperiment
 {
     private const int MaximumFaces = 256;
@@ -26,9 +36,10 @@ internal static class NativeSeedJoinExperiment
         internal bool HasSeed => Faces.Any(face => face.Input == 0);
     }
 
-    internal static void Run(Brep seed, NativeCompareInput input, List<NativeCompareCandidate> previews,
+    internal static NativeSeedJoinResult Run(Brep seed, NativeCompareInput input, List<NativeCompareCandidate>? previews,
         Action checkpoint, Action<string> write)
     {
+        var result = new NativeSeedJoinResult();
         var copies = new List<Brep>();
         Brep[]? joined = null;
         var seedArchive = input.GeometryFingerprint(seed);
@@ -57,7 +68,7 @@ internal static class NativeSeedJoinExperiment
             var nativeMilliseconds = native.ElapsedMilliseconds;
             write("SMARTSKIN_NATIVE_JOIN_RETURN | native_ms=" + nativeMilliseconds
                 + " | output_count=" + (joined?.Length ?? 0) + " | contributor_map="
-                + (indexMap is null ? "NULL" : string.Join(";", indexMap.Select((indices, i) => i + ":[" + string.Join(",", indices) + "]")))
+                + (indexMap is null ? "NULL" : string.Join(";", indexMap.Select((indices, i) => i + ":[" + (indices is null ? "NULL" : string.Join(",", indices)) + "]")))
                 + " | topology_does_not_verify_G1_G2=true");
             var freshUnchanged = copies.Select((copy, i) => input.GeometryFingerprint(copy) == freshArchives[i]).All(equal => equal);
             var capturedUnchanged = input.CopiesUnchanged();
@@ -77,24 +88,29 @@ internal static class NativeSeedJoinExperiment
                     + " | solid=" + joined[i].IsSolid + " | manifold=" + joined[i].IsManifold
                     + " | naked_edges=" + joined[i].Edges.Count(edge => edge.Valence == EdgeAdjacency.Naked)
                     + " | nonmanifold_edges=" + joined[i].Edges.Count(edge => edge.Valence == EdgeAdjacency.NonManifold));
-            var provenance = ResolveFaces(joined, indexMap, origins, copies.Count, input, checkpoint, write);
-            if (!provenance)
+            result.ProvenanceResolved = ResolveFaces(joined, indexMap, origins, copies.Count, input, checkpoint, write);
+            if (!result.ProvenanceResolved)
             {
                 write("SMARTSKIN_NATIVE_JOIN_RESULT | selected_opening=NOT_VERIFIED | reason=FACE_PROVENANCE_UNRESOLVED"
-                    + " | native_topology_reported=true | global_G1_G2=NOT_VERIFIED | Add_available=false");
-                return;
+                    + " | native_topology_reported=true | global_G1_G2=NOT_VERIFIED | join_probe_document_additions=0");
+                result.Status = "FACE_PROVENANCE_UNRESOLVED";
+                return result;
             }
             var edges = joined.SelectMany((brep, i) => brep.Edges.Select(edge => new OutputEdge
             {
                 Output = i, Edge = edge,
                 Faces = edge.AdjacentFaces().Distinct().Select(face => origins[brep.Faces[face].Id]).ToArray(),
             })).ToArray();
-            Measure(input, joined, edges, unselectedOriginalNaked, checkpoint, write);
+            result.SelectedOpeningJoined = Measure(input, joined, edges, unselectedOriginalNaked, checkpoint, write);
+            result.Status = result.SelectedOpeningJoined ? "SAMPLED_SELECTED_SEAMS_JOINED" : "SELECTED_SEAMS_NOT_VERIFIED";
             // Preview only the joined seed face; the actual full owner copies are never overdrawn.
             var seedFace = joined.SelectMany(brep => brep.Faces).Single(face => origins[face.Id].Input == 0);
             if (seedFace.Brep.IsValid)
             {
-                var preview = seedFace.DuplicateFace(false);
+                result.Cap = seedFace.DuplicateFace(false);
+                if (previews is not null)
+                {
+                var preview = result.Cap.DuplicateBrep();
                 try
                 {
                     previews.Add(new NativeCompareCandidate("EdgeSrf:JoinedSeedFaceCopy:POSITION_PREVIEW:G1_G2_NOT_VERIFIED", preview));
@@ -103,10 +119,15 @@ internal static class NativeSeedJoinExperiment
                         + " | full_joined_assembly_shown=false | paired_topology_in_report_only=true | G1_G2=NOT_VERIFIED");
                 }
                 finally { preview?.Dispose(); }
+                }
             }
         }
         catch (NativeCompareUnsupported exception)
-        { write("SMARTSKIN_NATIVE_JOIN_RESULT | selected_opening=NOT_VERIFIED | reason=" + exception.Message + " | G1_G2=NOT_VERIFIED"); }
+        {
+            result.Status = exception.Message;
+            write("SMARTSKIN_NATIVE_JOIN_RESULT | selected_opening=NOT_VERIFIED | reason=" + exception.Message + " | G1_G2=NOT_VERIFIED");
+        }
+        catch { result.Dispose(); throw; }
         finally
         {
             var failures = new List<string>();
@@ -115,11 +136,13 @@ internal static class NativeSeedJoinExperiment
                     NativeCompareReportCleanup.Attempt("join_output_" + i, joined[i].Dispose, failures);
             for (var i = 0; i < copies.Count; i++)
                 NativeCompareReportCleanup.Attempt("join_input_" + i, copies[i].Dispose, failures);
+            result.TemporariesDisposed = failures.Count == 0;
             // Reserved terminal sink path, including when an earlier ordinary report entry overflowed.
             write(NativeCompareReportBuffer.CleanupPrefix + " stage=JOIN_TEMPORARIES | all_join_temporaries_disposed=" + (failures.Count == 0)
                 + " | cleanup_failures=" + (failures.Count == 0 ? "NONE" : string.Join(",", failures)));
 
         }
+        return result;
     }
 
     private static void AddCopy(Brep original, int index, List<Brep> copies, Dictionary<Guid, FaceOrigin> origins, NativeCompareInput input)
@@ -143,10 +166,10 @@ internal static class NativeSeedJoinExperiment
         int inputCount, NativeCompareInput input, Action checkpoint, Action<string> write)
     {
         var seen = new HashSet<Guid>();
-        var resolved = indexMap is not null && indexMap.Count == outputs.Length;
+        var evidence = new List<IReadOnlyList<NativeSeedJoinPolicy.FaceEvidence>>();
         for (var i = 0; i < outputs.Length; i++)
         {
-            var contributors = new List<int>();
+            var faces = new List<NativeSeedJoinPolicy.FaceEvidence>();
             foreach (var face in outputs[i].Faces)
             {
                 checkpoint();
@@ -154,26 +177,34 @@ internal static class NativeSeedJoinExperiment
                 var unique = seen.Add(face.Id);
                 var geometry = known && face.Domain(0) == origin!.U && face.Domain(1) == origin.V
                     && input.GeometryFingerprint(face.UnderlyingSurface()) == origin.SurfaceArchive;
-                resolved &= known && unique && geometry;
-                if (known) contributors.Add(origin!.Input);
+                faces.Add(new NativeSeedJoinPolicy.FaceEvidence(face.Id, geometry));
                 write("SMARTSKIN_NATIVE_JOIN_FACE | output=" + i + " | face=" + face.FaceIndex
                     + " | input=" + (known ? origin!.Input.ToString() : "UNRESOLVED")
                     + " | original_face=" + (known ? origin!.Face.ToString() : "UNRESOLVED")
                     + " | unique_tag=" + unique + " | unchanged_surface_and_domain=" + geometry
                     + " | orientation_reversed=" + face.OrientationIsReversed);
             }
-            var agrees = indexMap is not null && indexMap.Count > i
-                && NativeSeedJoinPolicy.ContributorsAgree(indexMap[i], contributors, inputCount);
-            resolved &= agrees;
-            write("SMARTSKIN_NATIVE_JOIN_PROVENANCE | output=" + i + " | contributor_map_agrees=" + agrees);
+            evidence.Add(faces);
         }
-        resolved &= seen.Count == origins.Count && origins.Keys.All(seen.Contains);
+        var resolved = NativeSeedJoinPolicy.ResolveFaceProvenance(origins.ToDictionary(pair => pair.Key, pair => pair.Value.Input),
+            evidence, indexMap, inputCount, out var contributors);
+        for (var i = 0; i < outputs.Length; i++)
+        {
+            var agrees = indexMap is not null && indexMap.Count > i
+                && NativeSeedJoinPolicy.ContributorsAgree(indexMap[i], contributors[i], inputCount);
+            write("SMARTSKIN_NATIVE_JOIN_PROVENANCE | output=" + i
+                + " | contributor_map=" + (indexMap is null ? "ABSENT" : "SUPPLIED")
+                + " | contributor_source=" + (indexMap is null ? "TAG_DERIVED" : "TAG_DERIVED_WITH_NATIVE_MAP_CHECK")
+                + " | tag_derived_contributors=[" + string.Join(",", contributors[i]) + "]"
+                + " | contributor_map_agrees=" + (indexMap is null ? "NOT_AVAILABLE" : agrees.ToString()));
+        }
         write("SMARTSKIN_NATIVE_JOIN_PROVENANCE | all_faces=" + (resolved ? "VERIFIED_TAG_AND_SURFACE_ARCHIVE" : "NOT_VERIFIED")
-            + " | input_faces=" + origins.Count + " | distinct_output_tags=" + seen.Count);
+            + " | input_faces=" + origins.Count + " | distinct_output_tags=" + seen.Count
+            + " | optional_native_map=" + (indexMap is null ? "ABSENT_TAG_EVIDENCE_REQUIRED" : "SUPPLIED_MUST_AGREE"));
         return resolved;
     }
 
-    private static void Measure(NativeCompareInput input, Brep[] outputs, OutputEdge[] edges, int originalUnselectedNaked,
+    private static bool Measure(NativeCompareInput input, Brep[] outputs, OutputEdge[] edges, int originalUnselectedNaked,
         Action checkpoint, Action<string> write)
     {
         var passedPieces = 0; var unresolvedTotal = 0;
@@ -253,7 +284,8 @@ internal static class NativeSeedJoinExperiment
             + " | original_unselected_owner_naked_edges=" + originalUnselectedNaked
             + " | other_parent_naked_edges_without_sampled_selected_overlap=" + (parentNaked.Length - selectedOverlap)
             + " | whole_result_may_remain_open=true | coverage=BOUNDED_SPAN_FEATURE_AND_ENDPOINT_STATIONS"
-            + " | exact_continuous_locus=NOT_VERIFIED | full_joined_parent_trim_regions=NOT_VERIFIED | G1_G2=NOT_VERIFIED | Add_available=false");
+            + " | exact_continuous_locus=NOT_VERIFIED | full_joined_parent_trim_regions=NOT_VERIFIED | G1_G2=NOT_VERIFIED | join_probe_document_additions=0");
+        return openingPassed;
     }
 
     private static bool Ordinary(OutputEdge edge, int parentInput, int parentFace)
@@ -310,7 +342,7 @@ internal static class NativeSeedJoinExperiment
             if (edge.ClosestPoint(point, out var parameter)) gap = Math.Min(gap, point.DistanceTo(edge.PointAt(parameter)));
         return gap;
     }
-    private static IEnumerable<double> Stations(Curve curve, IEnumerable<double> features)
+    internal static IEnumerable<double> Stations(Curve curve, IEnumerable<double> features)
     {
         if (curve.SpanCount < 1 || curve.SpanCount > 512) throw new NativeCompareUnsupported("JOIN_STATION_SPAN_LIMIT");
         var result = new SortedSet<double>();

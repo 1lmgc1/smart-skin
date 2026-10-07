@@ -1,25 +1,22 @@
-# Smart Skin — P08E1N5 first-candidate native Join check
+# Smart Skin — P08E1N6 native Build user test
 
-Rhino8.21+ / Windows. Version **0.0.26-p08e1n5**.
+Rhino 8.21+ / Windows. Version **0.0.27-p08e1n6**.
 
-N5 makes `SmartSkinNativeCompare` test the first EdgeSrf seed with one native Join on fresh copies of the complete parent Breps. It reports output topology, selected seam coverage and unresolved provenance, with a read-only joined seed-face preview. See [scope and field instructions](docs/P08E1N5_SEED_JOIN.md). Join is separate from G1/G2; ordinary Build and its Python runtime remain unchanged. The full TXT save/retry flow is retained.
+The existing Smart Skin button and `SmartSurfaceBuild` now use the first native EdgeSrf candidate, a copy-only Join qualification, a cached preview and explicit confirmation. The result is labelled **«стыковка без гарантии плавности»**. The user approved this scope for testing; this release does not establish G1/G2 or general production stability.
 
-This experimental field candidate repairs compound-edge recognition and constructs a boundary-preserving native skin with selectable U/V guide handles. Original source objects remain unchanged. Upper source corners may be hard at the two explicitly identified vertices; finite source intervals and generated joins receive no continuity exemption. Whole-skin numerical construction, selected-handle regressions and the bounded cap-cap screen pass. The actual Rhino owner-screen and interactive workflow remain a field-test boundary. Delivery requires successful exact-SHA Windows CI and its unchanged verified install ZIP.
+Only the new cap is added, in the normal command's Undo record. Original parents remain separate and unchanged. No parent trimming, forced Join, tolerance increase, fake U/V controls or automatic slow Python fallback is used. Selected seams, isolated-cap boundaries and bounded validity/regularity checks must pass; these finite checks are not global geometry proofs.
 
-Known limitation: rotated inputs can fail the unchanged stored-curvature gate because of high-degree coefficient conditioning. The experimental constructor fails closed with a numerical diagnosis; arbitrary-orientation robustness is not claimed.
+- [Current installation and test steps](docs/INSTALL_CURVATURE_RU.md)
+- [Native Build scope and verification boundary](docs/P08E1N6_NATIVE_BUILD.md)
+- [Prior first-seed Join experiment](docs/P08E1N5_SEED_JOIN.md)
+- [Pipeline restoration and installer contract](docs/P08E1F2_PIPELINE_REPAIR.md)
 
-- [Install the verified CI runtime ZIP](docs/INSTALL_CURVATURE_RU.md)
-- [Compound-edge and profile-arrival repair](docs/P08E1F3_COMPOUND_EDGE_REPAIR.md)
-- [Pipeline restoration scope and acceptance](docs/P08E1F2_PIPELINE_REPAIR.md)
-- [Geometry workflow and supported input family](docs/P08E1_CURVATURE_CONTROL.md)
-- [Native-owner screen and verification limits](docs/P08E1F3_NATIVE_OWNER_SCREEN.md)
+`SmartSkinNativeCompare` remains read-only and the complete local TXT reporter remains available. `SmartSurfaceBuildPython` explicitly opens the earlier experimental high-degree U/V workflow; `SmartSurfaceBuildLegacy` retains its older route. Their historical limitations are documented in the F-series notes. The 16 Python runtime modules and pinned dependencies are retained unchanged, but the main native Build does not invoke them.
 
-Use the single install ZIP from the successful exact-SHA Windows CI run. It has INSTALL.cmd and manifest.json at its root. This source checkout is not an install package, and scripts/INSTALL.cmd must not silently build or install it.
-
-The installer uses the established HKCU/current lifecycle. It neither requires nor forbids an administrator token and never migrates HKLM plug-in registrations. UNINSTALL.cmd genuinely uninstalls Smart Skin. Stable plug-in/toolbar GUIDs and unrelated files are preserved.
+Use the single install ZIP from a successful exact-SHA Windows CI run. Its root contains INSTALL.cmd and manifest.json. A source checkout or recovery archive is not an installer. The established HKCU/current install lifecycle, fixed plug-in/toolbar GUIDs and unrelated files are preserved. UNINSTALL.cmd uninstalls the plug-in without changing shared Rhino layouts or HKLM registrations.
 
 ## Build and checks
 
-Run `dotnet restore SmartSkin.sln`, then `dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=<exact commit>` and Core tests. Use the dependency pins in Python/smart_skin.py for numerical tests. Production packaging and real Windows PowerShell5.1 CMD lifecycle tests run in `.github/workflows/build.yml` before an install artifact is delivered.
+Run `dotnet restore SmartSkin.sln`, `dotnet build SmartSkin.sln -c Release -p:SourceRevisionId=<exact commit>` and Core tests. The compiled plug-in targets net48; Core targets netstandard2.0. Rhino supplies RhinoCommon/Eto. Production packaging, retained Python regressions and actual Windows PowerShell5.1 CMD lifecycle tests run in `.github/workflows/build.yml`.
 
-The compiled plug-in targets net48; Core targets netstandard2.0. Rhino supplies RhinoCommon/Eto. Python runs inside Rhino ScriptEditor, with explicit pinned dependencies. Native Rhino UI and geometry acceptance remain separate from CI checks.
+Headless tests do not establish native window/input behavior, selected-seam results, Undo/Redo or final timing. Those remain explicit user-test gates. A successful Join is not a smoothness certificate.

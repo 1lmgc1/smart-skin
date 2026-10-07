@@ -7,6 +7,49 @@ namespace SmartSkin.Rhino8;
 // Pure decisions for the read-only Join probe. These do not infer smoothness from topology.
 internal static class NativeSeedJoinPolicy
 {
+    internal readonly struct FaceEvidence
+    {
+        internal Guid Tag { get; }
+        internal bool SurfaceAndDomainUnchanged { get; }
+        internal FaceEvidence(Guid tag, bool surfaceAndDomainUnchanged)
+        { Tag = tag; SurfaceAndDomainUnchanged = surfaceAndDomainUnchanged; }
+    }
+
+    internal static bool ResolveFaceProvenance(IReadOnlyDictionary<Guid, int> expectedFaces,
+        IReadOnlyList<IReadOnlyList<FaceEvidence>> outputFaces, IReadOnlyList<int[]>? nativeMap,
+        int inputCount, out int[][] tagDerivedContributors)
+    {
+        tagDerivedContributors = new int[outputFaces.Count][];
+        var seen = new HashSet<Guid>();
+        var resolved = inputCount >= 2 && expectedFaces.Count > 0 && outputFaces.Count > 0
+            && expectedFaces.Keys.All(tag => tag != Guid.Empty)
+            && expectedFaces.Values.All(input => input >= 0 && input < inputCount)
+            && expectedFaces.Values.Distinct().Count() == inputCount;
+        for (var output = 0; output < outputFaces.Count; output++)
+        {
+            var contributors = new HashSet<int>();
+            resolved &= outputFaces[output].Count > 0;
+            foreach (var face in outputFaces[output])
+            {
+                var known = expectedFaces.TryGetValue(face.Tag, out var input);
+                resolved &= known && face.SurfaceAndDomainUnchanged && seen.Add(face.Tag);
+                if (known) contributors.Add(input);
+            }
+            tagDerivedContributors[output] = contributors.OrderBy(input => input).ToArray();
+        }
+        resolved &= seen.Count == expectedFaces.Count && expectedFaces.Keys.All(seen.Contains);
+        // Rhino explicitly permits an absent map. It cannot veto independently complete face
+        // provenance. A supplied but contradictory or malformed map must still reject it.
+        if (nativeMap is not null)
+        {
+            resolved &= nativeMap.Count == outputFaces.Count;
+            for (var output = 0; output < outputFaces.Count; output++)
+                resolved &= nativeMap.Count > output
+                    && ContributorsAgree(nativeMap[output], tagDerivedContributors[output], inputCount);
+        }
+        return resolved;
+    }
+
     internal static bool OrdinarySelectedSeam(bool interior, int trimCount, bool allMated,
         int distinctFaces, bool hasSeedFace, bool hasExpectedParentFace, bool provenanceResolved) =>
         provenanceResolved && interior && trimCount == 2 && allMated && distinctFaces == 2

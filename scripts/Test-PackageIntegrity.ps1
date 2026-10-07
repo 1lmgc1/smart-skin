@@ -39,7 +39,7 @@ try {
         'missing-lifecycle-helper' = 'Required manifest file missing'; 'wrong-installer-revision' = 'identity or compatibility'
         'wrong-runtime-version' = 'identity or compatibility'; 'wrong-runtime-commit' = 'Runtime/source commit identity mismatch'
     }
-    if ($ValidManifest.feature_status -eq 'EXPERIMENTAL_NATIVE_CURVATURE') {
+    if ($ValidManifest.feature_status -eq 'EXPERIMENTAL_NATIVE_BUILD') {
         $Cases['missing-engine'] = 'Required native curvature engine asset missing'
         $Cases['wrong-dependency'] = 'Native Python dependency contract mismatch'
     } else { Write-Host 'SMARTSKIN_PACKAGE_TEST SKIP | native_engine_contract=NOT VERIFIED in installer-only scaffold' }
@@ -64,17 +64,17 @@ try {
             'missing-uninstall' { $M.files = @($M.files | Where-Object { $_.path -ne 'UNINSTALL.cmd' }); Remove-Item -LiteralPath (Join-Path $Bad 'UNINSTALL.cmd') }
             'bad-size' { $M.files[0].size = -1 }
             'missing-engine' {
-                $M.feature_status = 'EXPERIMENTAL_NATIVE_CURVATURE'
+                $M.feature_status = 'EXPERIMENTAL_NATIVE_BUILD'
                 $M.files = @($M.files | Where-Object { $_.path -ne 'net48/Python/native_input.py' })
                 $Engine = Join-Path $Bad 'net48/Python/native_input.py'
                 if (Test-Path -LiteralPath $Engine) { Remove-Item -LiteralPath $Engine }
             }
-            'wrong-dependency' { $M.feature_status = 'EXPERIMENTAL_NATIVE_CURVATURE'; $M.runtime.packages.scipy = '0.0.0' }
+            'wrong-dependency' { $M.feature_status = 'EXPERIMENTAL_NATIVE_BUILD'; $M.runtime.packages.scipy = '0.0.0' }
         }
         Write-AtomicJson $ManifestPath $M
         Assert-Rejected { $null = Assert-Package $Bad } $Kind $Cases[$Kind]
     }
-    if ($ValidManifest.feature_status -eq 'EXPERIMENTAL_NATIVE_CURVATURE') {
+    if ($ValidManifest.feature_status -eq 'EXPERIMENTAL_NATIVE_BUILD') {
         # Each new module is independently mandatory. A source-only import must
         # never make a package that omits a fan/provenance helper appear usable.
         foreach ($Asset in @('native_boundary_evidence.py', 'fan_shared_jets.py', 'fan_rational_fields.py', 'fan_geometry.py', 'lower_corner_geometry.py', 'upper_corner_geometry.py', 'upper_corner_certificate.py', 'constrained_uv.py', 'repaired_validation.py', 'native_owner_separation.py', 'atlas_separation.py')) {
