@@ -100,3 +100,11 @@ dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --
 - Before the first restored retry, recheck the captured source/tolerance state; every resulting edit still runs the complete numerical and native checks. Do not revive receipts, auto-accept, or introduce retry loops.
 - Log bounded generated handle IDs, requested/applied/restored values and revisions so field evidence distinguishes a missed event, rejected edit and accepted neutral state. Preserve the constructor, ranges, source geometry and physical gates.
 - A consumed left guide/handle pick must invalidate the current native confirmation token; a distinct later Enter/Space/right-click remains valid. Test conditional native input propagation without claiming it occurred in the field.
+
+## P08E1N1 native-operator diagnostic
+
+- Version `0.0.22-p08e1n1` adds only the separate read-only SmartSkinNativeCompare command; ordinary Build, Python construction, existing handle behavior and installer algorithms stay unchanged. No new toolbar button.
+- Derive the ordered logical boundary from actual selected edges/parent branches. Do not use five/nine density slots, copied center profiles or the legacy scaled-loft seed. Preserve within-chain geometric features, including exact representation splits; unsupported native bindings must be named.
+- Native Match uses copied parent BrepEdges, Average=false, with all-boundary metrics after each operation. Requested G2 and native curvature-percent settings are not physical residual proofs. No automatic refinement/search loop or silent Patch fallback.
+- Candidate previews are disposable and read-only. There is no Add, export or accept path in this diagnostic. Source and copied-owner archive integrity, bounded complexity and cancellation between native calls are mandatory.
+- Report sampled full ambient shape-operator metrics, native eligibility and operation time separately from unverified global G2, oriented continuation and separation. Actual native API execution remains a field test.
