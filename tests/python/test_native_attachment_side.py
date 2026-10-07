@@ -9,6 +9,7 @@ import math
 import pathlib
 import sys
 import unittest
+from unittest import mock
 import numpy as np
 
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[2]/'src/SmartSkin.Rhino8/Python'))
@@ -294,7 +295,11 @@ class NativeAttachmentSideMocks(unittest.TestCase):
         face,trim,edge=fixture()
         with self.assertRaises(InputCancelled):capture(face,trim,edge,budget=_SideBudget(lambda:True))
         with self.assertRaisesRegex(UnsupportedFamily,'OWNER_SIDE_BUDGET'):capture(face,trim,edge,budget=_SideBudget(max_calls=2))
-        with self.assertRaisesRegex(UnsupportedFamily,'OWNER_SIDE_BUDGET'):capture(face,trim,edge,budget=_SideBudget(seconds=0.))
+        # A real clock may not advance within this fast mock on Windows.
+        # Exercise an actually elapsed deadline without relying on timer resolution.
+        with mock.patch('native_input.time.monotonic',side_effect=[10.,11.]):
+            with self.assertRaisesRegex(UnsupportedFamily,'OWNER_SIDE_BUDGET'):
+                capture(face,trim,edge,budget=_SideBudget(seconds=0.))
 
     def test_singular_surface_is_rejected(self):
         face,trim,edge=fixture(jac=[[1,1],[0,0],[0,0]])

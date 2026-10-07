@@ -32,3 +32,5 @@ The diagnostic grants no corner exemptions, global G2, interior regularity, occu
 ## Verification boundary
 
 The build targets the official RhinoCommon8.21 SDK. Managed tests and exact-SHA Windows CI check compilation, reporting/planner contracts and installation, without executing Rhino's native geometry engine. The two Match variants and their native measurements require field execution. Cancellation and the time budget are checked between native calls; an individual native call cannot be force-interrupted.
+
+The first N2 Windows run exposed an existing test that expected the real monotonic clock to advance during a fast mocked capture. The expiry test now supplies a controlled clock crossing the deadline. The runtime clock comparison, time budget and all Python geometry code remain unchanged; the final source requires a new successful CI run.
