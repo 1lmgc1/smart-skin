@@ -23,6 +23,12 @@ internal sealed class NativeBuildCapQualification
             index + ":" + input.Owners[edge.OwnerIndex].Id.ToString("N") + ":" + edge.Native.EdgeIndex
             + ":" + NativeCompareProbeProtocol.Number(edge.Native.Domain.T0) + ":" + NativeCompareProbeProtocol.Number(edge.Native.Domain.T1)
             + ":" + edge.Reverse + ":features=" + string.Join(",", edge.Features.Select(NativeCompareProbeProtocol.Number)))));
+    internal void BindImprovement(NativeCompareInput input, Brep cap, string improvementEvidence)
+    {
+        if (!Matches(input, cap) || string.IsNullOrEmpty(improvementEvidence))
+            throw new InvalidOperationException("BUILD_IMPROVEMENT_CAP_SEAL_MISMATCH");
+        _evidence = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(_evidence) + "|improvement=" + improvementEvidence);
+    }
     internal int BoundaryStations { get; private set; }
     internal int RankStations { get; private set; }
     internal int ExactUpperExceptions { get; private set; }
@@ -131,7 +137,7 @@ internal sealed class NativeBuildCapQualification
         throw new NativeCompareUnsupported("BUILD_CAP_NONREGULAR_OR_NONFINITE_STATION;u="
             + NativeCompareProbeProtocol.Number(u) + ";v=" + NativeCompareProbeProtocol.Number(v));
     }
-    private static List<(NativeCompareInput.Edge Edge, double Parameter)> UpperBindings(NativeCompareInput input)
+    internal static List<(NativeCompareInput.Edge Edge, double Parameter)> UpperBindings(NativeCompareInput input)
     {
         var result = new List<(NativeCompareInput.Edge, double)>();
         if (input.Derivation != "NATURAL_SIDE_PAIR_COPLANAR_PARENT_CHAIN_STRAIGHT_CHAIN") return result;

@@ -33,15 +33,15 @@ internal sealed class NativeBuildStatusForm : Form
     private readonly Label _instruction = new() { Wrap = WrapMode.Word };
     private readonly Button _create = new() { Text = "Создать поверхность", Enabled = false };
     private bool _closingForCommand;
-    internal NativeBuildStatusForm(RhinoDoc document, NativeBuildController controller)
+    internal NativeBuildStatusForm(RhinoDoc document, NativeBuildController controller, string? improvementSummary = null)
     {
         _controller = controller;
-        Title = "Smart Skin"; ClientSize = new Size(430, 220); Resizable = false;
+        Title = "Smart Skin"; ClientSize = new Size(430, improvementSummary is null ? 220 : 245); Resizable = false;
         Maximizable = false; Minimizable = false; ShowActivated = false;
         Owner = RhinoEtoApp.MainWindowForDocument(document); this.UseRhinoStyle();
         var layout = new DynamicLayout { Padding = new Padding(16), Spacing = new Size(8, 10) };
         layout.AddRow(new Label { Text = NativeBuildCapQualification.UserStatus, Wrap = WrapMode.Word });
-        layout.AddRow(new Label { Text = "Предпросмотр новой поверхности. Исходные поверхности сохраняются.", Wrap = WrapMode.Word });
+        layout.AddRow(new Label { Text = improvementSummary ?? "Предпросмотр новой поверхности. Исходные поверхности сохраняются.", Wrap = WrapMode.Word });
         _instruction.Text = "Подготовка подтверждения…";
         layout.AddRow(_instruction);
         layout.AddRow(_create); Content = layout;

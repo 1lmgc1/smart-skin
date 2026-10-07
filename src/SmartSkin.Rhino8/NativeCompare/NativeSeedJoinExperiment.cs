@@ -37,7 +37,7 @@ internal static class NativeSeedJoinExperiment
     }
 
     internal static NativeSeedJoinResult Run(Brep seed, NativeCompareInput input, List<NativeCompareCandidate>? previews,
-        Action checkpoint, Action<string> write)
+        Action checkpoint, Action<string> write, string candidateLabel = "EdgeSrf:Seed")
     {
         var result = new NativeSeedJoinResult();
         var copies = new List<Brep>();
@@ -57,7 +57,7 @@ internal static class NativeSeedJoinExperiment
             var selectedKeys = new HashSet<string>(input.Edges.Select(edge => edge.OwnerIndex + ":" + edge.Native.EdgeIndex));
             var unselectedOriginalNaked = input.Owners.SelectMany((owner, i) => owner.Copy.Edges
                 .Where(edge => edge.Valence == EdgeAdjacency.Naked && !selectedKeys.Contains(i + ":" + edge.EdgeIndex))).Count();
-            write("SMARTSKIN_NATIVE_JOIN_START | candidate=EdgeSrf:Seed | inputs=" + copies.Count
+            write("SMARTSKIN_NATIVE_JOIN_START | candidate=" + candidateLabel + " | inputs=" + copies.Count
                 + " | input0=FRESH_SEED_COPY | other_inputs=FRESH_FULL_OWNER_COPIES | selected_source_pieces=" + input.Edges.Count
                 + " | original_unselected_owner_naked_edges=" + unselectedOriginalNaked
                 + " | tolerance=" + Number(input.Tolerance) + " | angle_tolerance_radians=" + Number(input.AngleTolerance)

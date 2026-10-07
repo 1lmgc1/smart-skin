@@ -14,7 +14,7 @@ namespace SmartSkin.Rhino8;
 
 internal static class NativeBuildWorkflow
 {
-    internal static Result Run(RhinoDoc document, RunMode mode)
+    internal static Result Run(RhinoDoc document, RunMode mode, bool improve = false)
     {
         var report = new NativeCompareReportBuffer(DateTime.UtcNow, Guid.NewGuid().ToString("N"));
         var result = Result.Failure;
@@ -23,13 +23,13 @@ internal static class NativeBuildWorkflow
         NativeCompareReportCapture.Run(report, NativeCompareReportExport.Store, NativeCompareReportExport.Message, write =>
         {
             var identity = BuildIdentity.FromAssembly(typeof(SmartSurfaceBuildCommand).Assembly);
-            write("SMARTSKIN_NATIVE_REPORT_START | command=SmartSurfaceBuild | report_id=" + report.ReportId
+            write("SMARTSKIN_NATIVE_REPORT_START | command=" + (improve ? "SmartSurfaceBuildImprove" : "SmartSurfaceBuild") + " | report_id=" + report.ReportId
                 + " | started_utc=" + report.StartedUtc.ToString("O") + " | version=" + identity.Version + " | commit=" + identity.Commit
                 + " | rhino=" + RhinoApp.Version + " | runtime=" + RuntimeInformation.FrameworkDescription
                 + " | model_units=" + document.ModelUnitSystem + " | absolute_tolerance=" + NativeCompareProbeProtocol.Number(document.ModelAbsoluteTolerance)
                 + " | angle_tolerance_radians=" + NativeCompareProbeProtocol.Number(document.ModelAngleToleranceRadians)
                 + " | user_status=" + NativeBuildCapQualification.UserStatus + " | run_mode=" + mode);
-            result = Execute(document, mode, write, out failureReason, out createdId); return result.ToString();
+            result = Execute(document, mode, improve, write, out failureReason, out createdId); return result.ToString();
         });
         // Functional Build ends in a surface or a visible reason. The complete report is
         // retained in-session and can be saved explicitly with SmartSkinNativeReport.
@@ -60,15 +60,17 @@ internal static class NativeBuildWorkflow
         return string.IsNullOrEmpty(reason) ? "Операция завершилась ошибкой до добавления." : reason;
     }
 
-    private static Result Execute(RhinoDoc doc, RunMode mode, Action<string> write, out string failureReason, out Guid createdId)
+    private static Result Execute(RhinoDoc doc, RunMode mode, bool improve, Action<string> write, out string failureReason, out Guid createdId)
     {
         failureReason = string.Empty; createdId = Guid.Empty;
         var beforeCount = RhinoDocumentMetrics.ActiveObjectCount(doc);
         NativeCompareInput? input = null; NativeSeedJoinResult? join = null;
+        NativeMatchImprovementResult? improvement = null; Brep? improvementSeed = null;
         NativeCompareCandidate? candidate = null; NativeBuildDocumentAdapter? adapter = null;
         NativeBuildPreview? preview = null; NativeBuildStatusForm? form = null; NativeBuildMouseConfirmation? mouse = null;
         var controller = new NativeBuildController();
-        var watch = new Stopwatch(); long lastPump = -50;
+        var watch = new Stopwatch(); var totalPreparation = new Stopwatch();
+        long lastPump = -50, improvementMilliseconds = 0;
         NativeBuildTransaction.Result? transaction = null;
         void Escape(object? sender, EventArgs args)
         { controller.Cancel(); form?.Cancel(); }
@@ -94,10 +96,10 @@ internal static class NativeBuildWorkflow
             selection.GeometryFilter = ObjectType.Curve; selection.SubObjectSelect = true; selection.GroupSelect = false;
             selection.GetMultiple(4, 32);
             if (selection.CommandResult() != Result.Success) return selection.CommandResult();
-            watch.Start(); RhinoApp.EscapeKeyPressed += Escape;
+            watch.Start(); totalPreparation.Start(); RhinoApp.EscapeKeyPressed += Escape;
             input = NativeCompareInput.Capture(doc, selection, Checkpoint);
             write("SMARTSKIN_NATIVE_BUILD_PLAN | selected_edges=" + input.Edges.Count + " | owners=" + input.Owners.Count
-                + " | derivation=" + input.Derivation + " | seed_calls=1 | join_calls=1 | fallback=NONE");
+                + " | derivation=" + input.Derivation + " | seed_calls=1 | baseline_join_calls=1 | max_finalist_join_calls=" + (improve ? "1" : "0") + " | fallback=" + (improve ? "PREQUALIFIED_BASELINE" : "NONE"));
             NativeCompareSideBinding.TraceSources(input, write);
             var curves = new List<Curve>();
             Brep? seed = null;
@@ -110,25 +112,51 @@ internal static class NativeBuildWorkflow
                 if (seed is null || !NativeCompareMeasure.Bounded(seed, out _)) throw new NativeCompareUnsupported("BUILD_NATIVE_SEED_INVALID");
                 write("SMARTSKIN_NATIVE_BUILD_SEED | native_ms=" + milliseconds + " | valid=true | candidate=FIRST_EDGESRF_SEED");
                 join = NativeSeedJoinExperiment.Run(seed, input, null, Checkpoint, write);
+                if (improve) { improvementSeed = seed; seed = null; }
             }
             finally { seed?.Dispose(); foreach (var curve in curves) curve.Dispose(); }
             var qualification = NativeBuildCapQualification.Evaluate(join, input, Checkpoint, write);
             if (!qualification.Ready || join.Cap is null) throw new NativeCompareUnsupported(qualification.Reason);
             if (!input.SourcesUnchanged(doc) || !input.CopiesUnchanged()) throw new NativeCompareUnsupported("BUILD_SOURCES_CHANGED_DURING_PREPARATION");
-            var copy = join.Cap.DuplicateBrep();
-            try { candidate = new NativeCompareCandidate("First native cap", copy); copy = null!; }
+            var selectedCap = join.Cap;
+            if (improve && improvementSeed is not null)
+            {
+                // Optional work has its own 15-second budget. Passive preview and a failed
+                // experiment cannot exhaust the ordinary baseline preparation budget.
+                watch.Stop(); var optionalPump = Stopwatch.StartNew(); long lastOptionalPump = -50;
+                void OptionalCheckpoint()
+                {
+                    if (optionalPump.ElapsedMilliseconds - lastOptionalPump >= 50)
+                    { lastOptionalPump = optionalPump.ElapsedMilliseconds; RhinoApp.Wait(); }
+                    if (controller.Cancelled || doc.IsClosing) throw new OperationCanceledException();
+                }
+                void AssertSources()
+                {
+                    OptionalCheckpoint();
+                    if (!input.SourcesUnchanged(doc) || !input.CopiesUnchanged())
+                        throw new InvalidOperationException("BUILD_SOURCES_CHANGED_DURING_IMPROVEMENT");
+                }
+                improvement = NativeMatchImprovementEngine.Run(improvementSeed, input, OptionalCheckpoint, AssertSources, write);
+                AssertSources(); optionalPump.Stop(); improvementMilliseconds = optionalPump.ElapsedMilliseconds; watch.Start();
+                if (improvement.Improved) { selectedCap = improvement.Join!.Cap!; qualification = improvement.Qualification!; }
+            }
+            var copy = selectedCap.DuplicateBrep();
+            try { candidate = new NativeCompareCandidate(improvement?.Improved == true ? "Improved native cap" : "First native cap", copy); copy = null!; }
             finally { copy?.Dispose(); }
-            if (input.GeometryFingerprint(candidate.Brep) != input.GeometryFingerprint(join.Cap))
+            if (input.GeometryFingerprint(candidate.Brep) != input.GeometryFingerprint(selectedCap))
                 throw new NativeCompareUnsupported("BUILD_PREVIEW_COPY_ARCHIVE_MISMATCH");
             adapter = new NativeBuildDocumentAdapter(doc, input, candidate.Brep, qualification, controller);
             var displayed = adapter.CaptureState();
             if (!displayed.IsWellFormed) throw new NativeCompareUnsupported("BUILD_ACTIVE_COMMAND_UNDO_OR_RECEIPT_UNAVAILABLE");
             preview = new NativeBuildPreview(doc, candidate) { Enabled = true };
-            form = new NativeBuildStatusForm(doc, controller); form.Show();
+            form = new NativeBuildStatusForm(doc, controller, improvement?.PreviewSummary); form.Show();
             mouse = new NativeBuildMouseConfirmation(doc, controller) { Enabled = true };
             RhinoApp.KeyboardEvent += Keyboard;
             controller.Prepared(); form.Prepared(); doc.Views.Redraw();
-            write("SMARTSKIN_NATIVE_BUILD_PREVIEW | prepared_ms=" + watch.ElapsedMilliseconds
+            watch.Stop(); totalPreparation.Stop();
+            write("SMARTSKIN_NATIVE_BUILD_PREVIEW | prepared_ms=" + totalPreparation.ElapsedMilliseconds
+                + " | baseline_prepare_ms=" + watch.ElapsedMilliseconds + " | improvement_ms=" + improvementMilliseconds
+                + " | candidate=" + (improvement?.Improved == true ? "IMPROVED_" + improvement.Tier : "BASELINE")
                 + " | cached_meshes=" + candidate.Meshes.Length + " | user_status=" + NativeBuildCapQualification.UserStatus
                 + " | confirmation=EXPLICIT_CREATE_BUTTON_OR_RELEASE_THEN_FRESH_INPUT | physical_state=WINDOWS_CURRENT_HIGH_BIT | commit_geometry=ISOLATED_CAP_ONLY | G1_G2=NOT_VERIFIED");
             using var decision = new GetOption();
@@ -193,11 +221,13 @@ internal static class NativeBuildWorkflow
             NativeCompareReportCleanup.Attempt("copy_archive", () => copiesUnchanged = input?.CopiesUnchanged() ?? false, failures);
             NativeCompareReportCleanup.Attempt("candidate", () => candidate?.Dispose(), failures);
             NativeCompareReportCleanup.Attempt("join_cap", () => join?.Dispose(), failures);
+            NativeCompareReportCleanup.Attempt("improvement", () => improvement?.Dispose(), failures);
+            NativeCompareReportCleanup.Attempt("improvement_seed", () => improvementSeed?.Dispose(), failures);
             NativeCompareReportCleanup.Attempt("input", () => input?.Dispose(), failures);
             NativeCompareReportCleanup.Attempt("redraw", () => doc.Views.Redraw(), failures);
             var afterCount = "NOT_VERIFIED";
             NativeCompareReportCleanup.Attempt("object_count", () => afterCount = RhinoDocumentMetrics.ActiveObjectCount(doc).ToString(), failures);
-            write(NativeCompareReportBuffer.CleanupPrefix + " command=SmartSurfaceBuild | document_objects=" + beforeCount + "->" + afterCount
+            write(NativeCompareReportBuffer.CleanupPrefix + " command=" + (improve ? "SmartSurfaceBuildImprove" : "SmartSurfaceBuild") + " | document_objects=" + beforeCount + "->" + afterCount
                 + " | source_archive=" + (sourceUnchanged ? "VERIFIED_UNCHANGED" : "NOT_VERIFIED")
                 + " | captured_copy_archive=" + (copiesUnchanged ? "VERIFIED_UNCHANGED" : "NOT_VERIFIED")
                 + " | transaction=" + (transaction?.Status.ToString() ?? "NO_ADD_ATTEMPT")

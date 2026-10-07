@@ -1,13 +1,16 @@
-# Smart Skin — P08E1N8 insertion verification
+# Smart Skin — P08E1N9 optional boundary improvement
 
-Rhino 8.21+ / Windows. Version **0.0.29-p08e1n8**.
+Rhino 8.21+ / Windows. Version **0.0.30-p08e1n9**.
 
 The existing Smart Skin button and `SmartSurfaceBuild` now use the first native EdgeSrf candidate, a copy-only Join qualification, a cached preview and an explicit **Создать поверхность** button. The result is labelled **«стыковка без гарантии плавности»**. The user approved this scope for testing; this release does not establish G1/G2 or general production stability.
+
+`SmartSurfaceBuildImprove` is an explicit optional experiment. It compares bounded native Match settings on independent copies and offers only a candidate whose required whole-boundary checks pass. If no improvement qualifies, the original candidate remains available with the reason shown. Ordinary `SmartSurfaceBuild` performs no Match calls.
 
 Only the new cap is added, in the normal command's Undo record. Original parents remain separate and unchanged. No parent trimming, forced Join, tolerance increase, fake U/V controls or automatic slow Python fallback is used. Selected seams, isolated-cap boundaries and bounded validity/regularity checks must pass; these finite checks are not global geometry proofs.
 
 - [Current installation and test steps](docs/INSTALL_CURVATURE_RU.md)
-- [Current insertion-readback correction](docs/P08E1N8_INSERTION_IDENTITY.md)
+- [Optional bounded Match improvement](docs/P08E1N9_BOUNDED_MATCH_IMPROVEMENT.md)
+- [Insertion-readback correction](docs/P08E1N8_INSERTION_IDENTITY.md)
 - [Native Build scope and verification boundary](docs/P08E1N6_NATIVE_BUILD.md)
 - [Prior first-seed Join experiment](docs/P08E1N5_SEED_JOIN.md)
 - [Pipeline restoration and installer contract](docs/P08E1F2_PIPELINE_REPAIR.md)

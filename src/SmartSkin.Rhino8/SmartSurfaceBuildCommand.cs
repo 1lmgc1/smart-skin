@@ -22,11 +22,14 @@ public sealed class SmartSurfaceBuildCommand : Command
     public override string EnglishName => "SmartSurfaceBuild";
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+        => RunNative(doc, mode, false);
+
+    internal static Result RunNative(RhinoDoc doc, RunMode mode, bool improve)
     {
         if (_nativeBuildActive) return Result.Cancel;
         if (RhinoApp.Version.CompareTo(new Version(8, 21)) < 0) return Result.Failure;
         _nativeBuildActive = true;
-        try { return NativeBuildWorkflow.Run(doc, mode); }
+        try { return NativeBuildWorkflow.Run(doc, mode, improve); }
         finally { _nativeBuildActive = false; }
     }
 
