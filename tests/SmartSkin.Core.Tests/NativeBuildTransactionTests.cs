@@ -46,6 +46,7 @@ public sealed class NativeBuildTransactionTests
     [InlineData("no-undo")]
     [InlineData("recording-disabled")]
     [InlineData("empty-candidate")]
+    [InlineData("empty-candidate-signature")]
     [InlineData("invalid-tolerance")]
     public void IncompleteReceiptCannotBeAcceptedByEvenAnAllowingPolicy(string change)
     {
@@ -56,6 +57,7 @@ public sealed class NativeBuildTransactionTests
             case "no-undo": doc.Undo = 0; break;
             case "recording-disabled": doc.RecordingEnabled = false; break;
             case "empty-candidate": doc.Candidate = Array.Empty<byte>(); break;
+            case "empty-candidate-signature": doc.CandidateGeometrySignature = Array.Empty<byte>(); break;
             case "invalid-tolerance": doc.AbsoluteTolerance = double.NaN; break;
         }
         var result = Transaction.Run(doc, new Transaction.Confirmation(doc.CaptureState()), new TestAcceptance(_ => null));
@@ -67,6 +69,7 @@ public sealed class NativeBuildTransactionTests
     [InlineData("source-archive")]
     [InlineData("source-identity")]
     [InlineData("candidate-archive")]
+    [InlineData("candidate-signature")]
     [InlineData("candidate-receipt")]
     [InlineData("proof")]
     [InlineData("absolute-tolerance")]
@@ -95,6 +98,7 @@ public sealed class NativeBuildTransactionTests
     [InlineData("source-archive")]
     [InlineData("source-identity")]
     [InlineData("candidate-archive")]
+    [InlineData("candidate-signature")]
     [InlineData("candidate-receipt")]
     [InlineData("proof")]
     [InlineData("absolute-tolerance")]
@@ -237,10 +241,79 @@ public sealed class NativeBuildTransactionTests
     public void ChangedInsertedGeometryFailsAndRollsBack()
     {
         var doc = new FakeDocument();
-        doc.AfterInsert = () => doc.Objects[doc.PlannedId].Archive[0]++;
+        doc.AfterInsert = () =>
+        {
+            doc.Objects[doc.PlannedId].Archive[0]++;
+            doc.Objects[doc.PlannedId].GeometrySignature[0]++;
+        };
         var result = Run(doc);
         Assert.Equal(Transaction.Outcome.Failed, result.Status);
+        Assert.StartsWith("BUILD_INSERTED_CAP_GEOMETRY_MISMATCH:", result.Reason);
         Assert.Equal(Transaction.Rollback.Complete, result.Cleanup);
+        Assert.Equal(new byte[] { 10, 20, 30 }, doc.Candidate);
+        Assert.Equal(doc.PlannedId, Assert.Single(doc.DeleteCalls));
+        AssertOriginalsIntact(doc);
+    }
+
+    [Fact]
+    public void InsertedSerializationMetadataMayDifferWhileCandidateArchiveAndGeometryStaySealed()
+    {
+        var doc = new FakeDocument();
+        // Only the inserted object's serialized metadata changes. Its exact geometric
+        // content and the original, still-disposable candidate remain unchanged.
+        doc.AfterInsert = () => doc.Objects[doc.PlannedId].Archive = new byte[] { 10, 20, 30, 99 };
+        var result = Run(doc);
+        Assert.Equal(Transaction.Outcome.Added, result.Status);
+        Assert.Equal(new byte[] { 10, 20, 30 }, doc.Candidate);
+        Assert.False(doc.Candidate.SequenceEqual(doc.Objects[doc.PlannedId].Archive));
+        Assert.Equal(doc.CandidateGeometrySignature, doc.Objects[doc.PlannedId].GeometrySignature);
+        Assert.Empty(doc.DeleteCalls);
+        AssertOriginalsIntact(doc);
+    }
+
+    [Theory]
+    [InlineData("missing", "BUILD_INSERTED_CAP_COUNT_MISMATCH:")]
+    [InlineData("duplicate", "BUILD_INSERTED_CAP_COUNT_MISMATCH:")]
+    [InlineData("wrong-id", "BUILD_INSERTED_CAP_ID_MISMATCH:")]
+    [InlineData("wrong-marker", "BUILD_INSERTED_CAP_MARKER_MISMATCH:")]
+    [InlineData("empty-signature", "BUILD_INSERTED_CAP_GEOMETRY_UNAVAILABLE:")]
+    [InlineData("changed-signature", "BUILD_INSERTED_CAP_GEOMETRY_MISMATCH:")]
+    public void FinalInspectionReportsTheSpecificFailedFieldAndRollsBackOwnedCap(string change, string reasonPrefix)
+    {
+        var doc = new FakeDocument();
+        // Fault only the first inspection; rollback still receives the live native ID
+        // and marker and must remove the real insertion, never the reported wrong ID.
+        doc.FirstInspection = live => change switch
+        {
+            "missing" => Array.Empty<Transaction.CreatedCap>(),
+            "duplicate" => new[] { live[0], live[0] },
+            "wrong-id" => new[] { new Transaction.CreatedCap(doc.UnrelatedId, doc.Marker, doc.CandidateGeometrySignature) },
+            "wrong-marker" => new[] { new Transaction.CreatedCap(doc.PlannedId, Guid.NewGuid(), doc.CandidateGeometrySignature) },
+            "empty-signature" => new[] { new Transaction.CreatedCap(doc.PlannedId, doc.Marker, Array.Empty<byte>()) },
+            "changed-signature" => new[] { new Transaction.CreatedCap(doc.PlannedId, doc.Marker, new byte[] { 99 }) },
+            _ => throw new ArgumentOutOfRangeException(nameof(change))
+        };
+        var result = Run(doc);
+        Assert.Equal(Transaction.Outcome.Failed, result.Status);
+        Assert.StartsWith(reasonPrefix, result.Reason);
+        Assert.Equal(Transaction.Rollback.Complete, result.Cleanup);
+        Assert.Equal(doc.PlannedId, Assert.Single(doc.DeleteCalls));
+        Assert.False(doc.Objects.ContainsKey(doc.PlannedId));
+        AssertOriginalsIntact(doc);
+    }
+
+    [Fact]
+    public void UnavailableGeometryOnEveryInspectionStillRollsBackByOwnedIdentityAndMarker()
+    {
+        var doc = new FakeDocument();
+        // Persist unavailable extraction through every read, including rollback reads.
+        doc.AfterInsert = () => doc.Objects[doc.PlannedId].GeometrySignature = Array.Empty<byte>();
+        var result = Run(doc);
+        Assert.Equal(Transaction.Outcome.Failed, result.Status);
+        Assert.StartsWith("BUILD_INSERTED_CAP_GEOMETRY_UNAVAILABLE:", result.Reason);
+        Assert.Equal(Transaction.Rollback.Complete, result.Cleanup);
+        Assert.Equal(doc.PlannedId, Assert.Single(doc.DeleteCalls));
+        Assert.False(doc.Objects.ContainsKey(doc.PlannedId));
         AssertOriginalsIntact(doc);
     }
 
@@ -304,11 +377,25 @@ public sealed class NativeBuildTransactionTests
         var doc = new FakeDocument();
         var state = doc.CaptureState();
         state.CandidateArchive[0]++;
+        state.CandidateGeometrySignature[0]++;
         state.GeometryEvidence[0]++;
         doc.Candidate[0]++;
         var result = Transaction.Run(doc, new Transaction.Confirmation(state), Acceptance());
         Assert.Equal(Transaction.Outcome.StaleConfirmation, result.Status);
         Assert.Equal(0, doc.AddCalls);
+    }
+
+    [Fact]
+    public void SignatureGetterAndInsertedSignatureConstructorCannotMutateTheirSeals()
+    {
+        var doc = new FakeDocument();
+        var state = doc.CaptureState();
+        state.CandidateGeometrySignature[0]++;
+        var signature = doc.CandidateGeometrySignature.ToArray();
+        var inserted = new Transaction.CreatedCap(Guid.NewGuid(), Guid.NewGuid(), signature);
+        signature[0]++;
+        Assert.True(inserted.Matches(state));
+        Assert.Equal(Transaction.Outcome.Added, Transaction.Run(doc, new Transaction.Confirmation(state), Acceptance()).Status);
     }
 
     private static Transaction.Result Run(FakeDocument doc) =>
@@ -332,6 +419,7 @@ public sealed class NativeBuildTransactionTests
                 var old = doc.SourceId; doc.SourceId = Guid.NewGuid();
                 doc.Objects.Add(doc.SourceId, doc.Objects[old]); doc.Objects.Remove(old); break;
             case "candidate-archive": doc.Candidate[0]++; break;
+            case "candidate-signature": doc.CandidateGeometrySignature[0]++; break;
             case "candidate-receipt": doc.ReceiptId = Guid.NewGuid(); break;
             case "proof": doc.Evidence[0]++; break;
             case "absolute-tolerance": doc.AbsoluteTolerance *= 2; break;
@@ -360,7 +448,12 @@ public sealed class NativeBuildTransactionTests
     {
         internal Guid Marker;
         internal byte[] Archive;
-        internal FakeObject(Guid marker, byte[] archive) { Marker = marker; Archive = (byte[])archive.Clone(); }
+        internal byte[] GeometrySignature;
+        internal FakeObject(Guid marker, byte[] archive, byte[]? geometrySignature = null)
+        {
+            Marker = marker; Archive = (byte[])archive.Clone();
+            GeometrySignature = (byte[])(geometrySignature ?? archive).Clone();
+        }
     }
 
     private sealed class FakeDocument : Transaction.IDocument
@@ -378,11 +471,13 @@ public sealed class NativeBuildTransactionTests
         internal double MetresPerModelUnit = .001;
         internal Guid ReceiptId = Guid.NewGuid();
         internal byte[] Candidate = { 10, 20, 30 };
+        internal byte[] CandidateGeometrySignature = { 11, 22, 33 };
         internal byte[] Evidence = { 9, 8, 7 };
         internal bool Cancelled;
         internal string AddMode = "normal";
         internal string DeleteMode = "normal";
         internal bool ThrowOnInspect;
+        internal Func<IReadOnlyList<Transaction.CreatedCap>, IReadOnlyList<Transaction.CreatedCap>>? FirstInspection;
         internal Action? BeforeCapture;
         internal Action? AfterInsert;
         internal Action? AfterDelete;
@@ -403,7 +498,7 @@ public sealed class NativeBuildTransactionTests
         {
             BeforeCapture?.Invoke();
             return new Transaction.State(DocumentSerial, Generation, RecordingEnabled ? Undo : 0, AbsoluteTolerance, AngleTolerance, ModelUnitSystem, MetresPerModelUnit, ReceiptId,
-                Candidate, Evidence, new Dictionary<Guid, byte[]> { [SourceId] = Objects[SourceId].Archive }, Objects.Keys, Cancelled);
+                Candidate, CandidateGeometrySignature, Evidence, new Dictionary<Guid, byte[]> { [SourceId] = Objects[SourceId].Archive }, Objects.Keys, Cancelled);
         }
 
         public Guid AddCap(Transaction.State confirmed, Guid objectId, Guid transactionMarker)
@@ -413,7 +508,7 @@ public sealed class NativeBuildTransactionTests
             Assert.NotEqual(Guid.Empty, transactionMarker);
             if (AddMode == "empty-before") return Guid.Empty;
             if (AddMode == "throw-before") throw new InvalidOperationException("Native failure before insertion.");
-            Objects.Add(objectId, new FakeObject(transactionMarker, confirmed.CandidateArchive));
+            Objects.Add(objectId, new FakeObject(transactionMarker, confirmed.CandidateArchive, confirmed.CandidateGeometrySignature));
             AfterInsert?.Invoke();
             if (AddMode == "empty-after") return Guid.Empty;
             if (AddMode == "throw-after") throw new InvalidOperationException("Native failure after insertion.");
@@ -425,8 +520,9 @@ public sealed class NativeBuildTransactionTests
             InspectedDocumentSerials.Add(documentSerial);
             if (ThrowOnInspect) throw new InvalidOperationException("Cannot inspect live objects.");
             Assert.Equal(7ul, documentSerial); // The fake remains bound to original document 7.
-            return Objects.Where(pair => pair.Key == plannedId || pair.Value.Marker == transactionMarker)
-                .Select(pair => new Transaction.CreatedCap(pair.Key, pair.Value.Marker, pair.Value.Archive)).ToArray();
+            var live = Objects.Where(pair => pair.Key == plannedId || pair.Value.Marker == transactionMarker)
+                .Select(pair => new Transaction.CreatedCap(pair.Key, pair.Value.Marker, pair.Value.GeometrySignature)).ToArray();
+            return InspectedDocumentSerials.Count == 1 && FirstInspection is not null ? FirstInspection(live) : live;
         }
 
         public bool DeleteCreatedCap(ulong documentSerial, Guid objectId, Guid transactionMarker)

@@ -154,3 +154,9 @@ dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --
 - Insert the sealed cap with explicit `splitKinkySurfaces=false`; never leave native default kink splitting inconsistent with exact post-Add geometry checks. Retain full readback verification and owned-only rollback. Do not relax G0, source, regularity or Undo gates without evidence.
 - The main Build does not automatically open a report-folder chooser. Store the report for explicit `SmartSkinNativeReport`; read-only Compare may keep its reporting flow. Show a visible failure reason rather than silently ending in a report. After success, highlight only the new cap and state that the surface was created; presentation failure must not turn a completed transaction into rollback.
 - Keep the approved no-guaranteed-smoothness label, one new cap, unchanged parents, no automatic Python fallback and exact-SHA Windows CI/artifact pipeline. No claim that the exact N6 field failure location or licensed-Rhino end-to-end behavior has been proved locally.
+
+## P08E1N8 geometric insertion identity
+
+- Version `0.0.29-p08e1n8` separates immutable source/prepared-candidate archive seals from the inserted cap's geometric identity. The latter must contain independently read exact rational geometry, domains, vertices, boundary/trim topology and orientation; cache/display/user-data fields are not shape. Never substitute a sampled bounding box or an unverified native equality flag.
+- Preserve separate object-ID and transaction-marker checks, current source/candidate/Undo checks and owned-only rollback. A changed geometric signature must reject. Report the precise failing post-Add component.
+- Keep construction, Join/G0/rank qualification, explicit Create action and no-guaranteed-smoothness scope unchanged. The field screenshot identifies the insertion-comparison stage, not the exact native archive field. Do not claim licensed host execution from managed tests or assembly inspection.

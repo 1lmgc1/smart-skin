@@ -55,7 +55,7 @@ internal sealed class NativeBuildDocumentAdapter : NativeBuildTransaction.IDocum
         var undo = _document.UndoRecordingEnabled && _document.UndoRecordingIsActive ? _document.CurrentUndoRecordSerialNumber : 0;
         return new NativeBuildTransaction.State(serial, _controller.Generation, undo, _document.ModelAbsoluteTolerance,
             _document.ModelAngleToleranceRadians, (int)units, scale, _receipt,
-            Convert.FromBase64String(_input.GeometryFingerprint(_cap)), _qualification.Evidence, sources,
+            Convert.FromBase64String(_input.GeometryFingerprint(_cap)), NativeBuildGeometrySignature.Capture(_cap), _qualification.Evidence, sources,
             LiveObjects().Select(obj => obj.Id), _controller.Cancelled || _document.IsClosing || serial != _document.RuntimeSerialNumber);
     }
     internal bool PreviewMetadataCurrent(NativeBuildTransaction.State displayed)
@@ -93,8 +93,16 @@ internal sealed class NativeBuildDocumentAdapter : NativeBuildTransaction.IDocum
     public IReadOnlyList<NativeBuildTransaction.CreatedCap> InspectInsertion(ulong documentSerial, Guid plannedId, Guid transactionMarker)
     {
         if (documentSerial != _document.RuntimeSerialNumber) throw new InvalidOperationException("BUILD_ROLLBACK_DOCUMENT_MISMATCH");
-        return LiveObjects().Where(obj => obj.Id == plannedId || Marker(obj) == transactionMarker)
-            .Select(obj => new NativeBuildTransaction.CreatedCap(obj.Id, Marker(obj), Convert.FromBase64String(_input.GeometryFingerprint(obj.Geometry)))).ToArray();
+        var result = new List<NativeBuildTransaction.CreatedCap>();
+        foreach (var obj in LiveObjects().Where(obj => obj.Id == plannedId || Marker(obj) == transactionMarker))
+        {
+            // Failed content extraction must not lose the identity needed for safe rollback.
+            var signature = Array.Empty<byte>();
+            try { if (obj.Geometry is Brep brep) signature = NativeBuildGeometrySignature.Capture(brep); }
+            catch (Exception) { /* The core reports unavailable geometry, then removes only owned IDs. */ }
+            result.Add(new NativeBuildTransaction.CreatedCap(obj.Id, Marker(obj), signature));
+        }
+        return result;
     }
     public bool DeleteCreatedCap(ulong documentSerial, Guid objectId, Guid transactionMarker)
     {

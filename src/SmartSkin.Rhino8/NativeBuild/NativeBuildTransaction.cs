@@ -54,6 +54,7 @@ internal static class NativeBuildTransaction
     internal sealed class State
     {
         private readonly byte[] _candidateArchive;
+        private readonly byte[] _candidateGeometrySignature;
         private readonly byte[] _geometryEvidence;
         private readonly Dictionary<Guid, byte[]> _sources;
         private readonly Guid[] _objectIds;
@@ -68,12 +69,13 @@ internal static class NativeBuildTransaction
         internal Guid CandidateReceiptId { get; }
         internal bool Cancelled { get; }
         internal byte[] CandidateArchive => (byte[])_candidateArchive.Clone();
+        internal byte[] CandidateGeometrySignature => (byte[])_candidateGeometrySignature.Clone();
         internal byte[] GeometryEvidence => (byte[])_geometryEvidence.Clone();
         internal IReadOnlyList<Guid> ObjectIds => Array.AsReadOnly(_objectIds);
 
         internal State(ulong documentSerial, long generation, uint activeUndoSerial,
             double absoluteTolerance, double angleToleranceRadians, int modelUnitSystem, double metresPerModelUnit, Guid candidateReceiptId,
-            byte[] candidateArchive, byte[] geometryEvidence,
+            byte[] candidateArchive, byte[] candidateGeometrySignature, byte[] geometryEvidence,
             IReadOnlyDictionary<Guid, byte[]> sourceArchives, IEnumerable<Guid> objectIds,
             bool cancelled = false)
         {
@@ -82,6 +84,7 @@ internal static class NativeBuildTransaction
             ModelUnitSystem = modelUnitSystem; MetresPerModelUnit = metresPerModelUnit;
             CandidateReceiptId = candidateReceiptId; Cancelled = cancelled;
             _candidateArchive = (byte[])candidateArchive.Clone();
+            _candidateGeometrySignature = (byte[])candidateGeometrySignature.Clone();
             _geometryEvidence = (byte[])geometryEvidence.Clone();
             _sources = sourceArchives.ToDictionary(pair => pair.Key, pair => (byte[])pair.Value.Clone());
             _objectIds = objectIds.ToArray();
@@ -89,7 +92,8 @@ internal static class NativeBuildTransaction
 
         internal bool IsWellFormed => DocumentSerial != 0 && Generation >= 0 && ActiveUndoSerial != 0
             && PositiveFinite(AbsoluteTolerance) && PositiveFinite(AngleToleranceRadians) && PositiveFinite(MetresPerModelUnit)
-            && CandidateReceiptId != Guid.Empty && _candidateArchive.Length > 0 && _geometryEvidence.Length > 0
+            && CandidateReceiptId != Guid.Empty && _candidateArchive.Length > 0
+            && _candidateGeometrySignature.Length > 0 && _geometryEvidence.Length > 0
             && _sources.Count > 0 && _sources.All(pair => pair.Key != Guid.Empty && pair.Value.Length > 0)
             && _objectIds.All(id => id != Guid.Empty) && _objectIds.Distinct().Count() == _objectIds.Length
             && _sources.Keys.All(id => _objectIds.Contains(id));
@@ -100,6 +104,7 @@ internal static class NativeBuildTransaction
             && ModelUnitSystem == other.ModelUnitSystem && MetresPerModelUnit.Equals(other.MetresPerModelUnit)
             && CandidateReceiptId == other.CandidateReceiptId
             && _candidateArchive.SequenceEqual(other._candidateArchive)
+            && _candidateGeometrySignature.SequenceEqual(other._candidateGeometrySignature)
             && _geometryEvidence.SequenceEqual(other._geometryEvidence)
             && _sources.Count == other._sources.Count
             && _sources.All(pair => other._sources.TryGetValue(pair.Key, out var bytes) && pair.Value.SequenceEqual(bytes));
@@ -110,12 +115,15 @@ internal static class NativeBuildTransaction
 
     internal sealed class CreatedCap
     {
-        private readonly byte[] _archive;
+        private readonly byte[] _geometrySignature;
         internal Guid ObjectId { get; }
         internal Guid TransactionMarker { get; }
-        internal CreatedCap(Guid objectId, Guid transactionMarker, byte[] archive)
-        { ObjectId = objectId; TransactionMarker = transactionMarker; _archive = (byte[])archive.Clone(); }
-        internal bool Matches(State state) => _archive.SequenceEqual(state.CandidateArchive);
+        internal bool HasGeometrySignature => _geometrySignature.Length > 0;
+        // Exact geometry/topology signature excludes native serialization metadata that
+        // may change on insertion. Raw candidate/source archive seals remain in State.
+        internal CreatedCap(Guid objectId, Guid transactionMarker, byte[] geometrySignature)
+        { ObjectId = objectId; TransactionMarker = transactionMarker; _geometrySignature = (byte[])geometrySignature.Clone(); }
+        internal bool Matches(State state) => _geometrySignature.SequenceEqual(state.CandidateGeometrySignature);
     }
 
     internal sealed class Confirmation
@@ -186,8 +194,16 @@ internal static class NativeBuildTransaction
                 throw new InvalidOperationException("Document, sources, candidate, units, tolerances, generation or Undo changed during Add.");
             if (!after.HasExactlyObjects(expected.ObjectIds.Concat(new[] { plannedId })))
                 throw new InvalidOperationException("Add did not produce exactly one new object with all originals retained.");
-            if (owned.Count != 1 || owned[0].ObjectId != plannedId || owned[0].TransactionMarker != marker || !owned[0].Matches(expected))
-                throw new InvalidOperationException("The inserted cap's identity, transaction marker or geometry differs from the confirmed candidate.");
+            if (owned.Count != 1)
+                throw new InvalidOperationException("BUILD_INSERTED_CAP_COUNT_MISMATCH: expected=1; inspected=" + owned.Count + ".");
+            if (owned[0].ObjectId != plannedId)
+                throw new InvalidOperationException("BUILD_INSERTED_CAP_ID_MISMATCH: inspected object ID differs from the planned cap ID.");
+            if (owned[0].TransactionMarker != marker)
+                throw new InvalidOperationException("BUILD_INSERTED_CAP_MARKER_MISMATCH: inserted cap does not carry this transaction's marker.");
+            if (!owned[0].HasGeometrySignature)
+                throw new InvalidOperationException("BUILD_INSERTED_CAP_GEOMETRY_UNAVAILABLE: exact geometric insertion signature could not be read.");
+            if (!owned[0].Matches(expected))
+                throw new InvalidOperationException("BUILD_INSERTED_CAP_GEOMETRY_MISMATCH: exact geometric insertion signature differs from the confirmed candidate.");
             return new Result(Outcome.Added, "Added exactly one confirmed cap in the existing command Undo record.", plannedId, addAttempted: true);
         }
         catch (Exception error)
