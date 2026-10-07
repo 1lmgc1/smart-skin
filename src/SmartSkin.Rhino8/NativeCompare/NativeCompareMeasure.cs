@@ -85,21 +85,21 @@ internal static class NativeCompareMeasure
     }
 
     internal static void ReportSides(string recipe, string phase, Brep candidate, NativeCompareInput input,
-        NativeCompareSideBinding binding, Action checkpoint)
+        NativeCompareSideBinding binding, Action checkpoint, Action<string> write)
     {
         var watch = Stopwatch.StartNew();
         var bounded = Bounded(candidate, out var cp);
-        RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_BOUNDARY | recipe=" + recipe + " | phase=" + phase
+        write("SMARTSKIN_NATIVE_COMPARE_BOUNDARY | recipe=" + recipe + " | phase=" + phase
             + " | valid=" + candidate.IsValid + " | bounded=" + bounded + " | faces=" + candidate.Faces.Count
             + " | control_points=" + cp + " | attribution=CONDITIONAL_NATURAL_PARAMETER_SIDE"
             + " | physical_correspondence=NOT_VERIFIED | occupied_side=NOT_VERIFIED | parent_separation=NOT_VERIFIED");
-        binding.TraceCandidate(recipe, phase, candidate, input);
+        binding.TraceCandidate(recipe, phase, candidate, input, write);
         for (var side = 0; side < 4; side++)
         {
             var edge = bounded ? binding.Resolve(candidate, side) : null;
             if (edge is null)
             {
-                RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_SIDE_RESULT | recipe=" + recipe + " | phase=" + phase
+                write("SMARTSKIN_NATIVE_COMPARE_SIDE_RESULT | recipe=" + recipe + " | phase=" + phase
                     + " | side=" + side + " | relation=" + NativeCompareProbeProtocol.Relation(side)
                     + " | both_directions=NOT_VERIFIED_UNRESOLVED_NATURAL_SIDE | global_G2=NOT_VERIFIED");
                 continue;
@@ -153,7 +153,7 @@ internal static class NativeCompareMeasure
                             NativeCompareMath.OperatorResidual(a.Operator, b.Operator, dot < 0 ? -1 : 1), distance <= input.Tolerance);
                     }
                 }
-                RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_SIDE_RESULT | recipe=" + recipe + " | phase=" + phase
+                write("SMARTSKIN_NATIVE_COMPARE_SIDE_RESULT | recipe=" + recipe + " | phase=" + phase
                     + " | side=" + side + " | relation=" + NativeCompareProbeProtocol.Relation(side)
                     + " | direction=" + (pass == 0 ? "SOURCE_TO_CANDIDATE" : "CANDIDATE_TO_SOURCE")
                     + " | source_edges_touched=" + sourceEdgesTouched.Count + "/" + targets.Length
@@ -163,7 +163,7 @@ internal static class NativeCompareMeasure
                     + " | finite_bands=NONE_EXCLUDED | corners=NOT_VERIFIED");
             }
         }
-        RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_MEASURE_END | recipe=" + recipe + " | phase=" + phase
+        write("SMARTSKIN_NATIVE_COMPARE_MEASURE_END | recipe=" + recipe + " | phase=" + phase
             + " | measurement_ms=" + watch.ElapsedMilliseconds);
     }
 

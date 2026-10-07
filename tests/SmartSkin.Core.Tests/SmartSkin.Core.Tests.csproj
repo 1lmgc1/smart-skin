@@ -17,6 +17,7 @@
   <ItemGroup>
     <Compile Include="..\..\src\SmartSkin.Rhino8\NativeCompare\NativeCompareMath.cs" Link="NativeCompareMath.cs" />
     <Compile Include="..\..\src\SmartSkin.Rhino8\NativeCompare\NativeCompareProbeProtocol.cs" Link="NativeCompareProbeProtocol.cs" />
+    <Compile Include="..\..\src\SmartSkin.Rhino8\NativeCompare\NativeCompareReportBuffer.cs" Link="NativeCompareReportBuffer.cs" />
     <ProjectReference Include="..\..\src\SmartSkin.Core\SmartSkin.Core.csproj" />
   </ItemGroup>
 </Project>

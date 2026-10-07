@@ -43,15 +43,15 @@ internal sealed class NativeCompareSideBinding
     private static string Domain(Interval domain) => "[" + NativeCompareProbeProtocol.Number(domain.T0)
         + "," + NativeCompareProbeProtocol.Number(domain.T1) + "]";
 
-    internal static void TraceSources(NativeCompareInput input)
+    internal static void TraceSources(NativeCompareInput input, Action<string> write)
     {
-        // Private runtime values stay in this user's local Rhino command history. No artifact/file export.
+        // Private runtime values stay in this user's console and explicitly saved local diagnostic report.
         for (var side = 0; side < 4; side++)
             for (var member = 0; member < input.Sides[side].Count; member++)
             {
                 var source = input.Sides[side][member];
                 var edge = source.Native; var trim = Trim(edge);
-                RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_SOURCE | side=" + side + " | logical_member=" + member
+                write("SMARTSKIN_NATIVE_COMPARE_SOURCE | side=" + side + " | logical_member=" + member
                     + " | owner=" + source.OwnerIndex + " | source_object_id=" + input.Owners[source.OwnerIndex].Id
                     + " | edge=" + edge.EdgeIndex + " | trim=" + trim.TrimIndex + " | face=" + trim.Face.FaceIndex
                     + " | loop=" + trim.Loop.LoopIndex + " | iso=" + trim.IsoStatus
@@ -59,18 +59,18 @@ internal sealed class NativeCompareSideBinding
                     + " | native_end=" + Point(edge.PointAtEnd) + " | native_vs_logical=" + (source.Reverse ? "REVERSED" : "SAME")
                     + " | logical_start=" + Point(source.Start) + " | logical_end=" + Point(source.End)
                     + " | trim_reversed=" + trim.IsReversed() + " | face_reversed=" + trim.Face.OrientationIsReversed
-                    + " | target_runtime_type=BrepEdge | export=LOCAL_COMMAND_HISTORY_ONLY");
+                    + " | target_runtime_type=BrepEdge | export=LOCAL_USER_CHOSEN_REPORT");
             }
     }
 
-    internal void TraceCandidate(string recipe, string phase, Brep candidate, NativeCompareInput input)
+    internal void TraceCandidate(string recipe, string phase, Brep candidate, NativeCompareInput input, Action<string> write)
     {
         for (var side = 0; side < 4; side++)
         {
             var edge = Resolve(candidate, side);
             if (edge is null)
             {
-                RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_MAPPING | recipe=" + recipe + " | phase=" + phase
+                write("SMARTSKIN_NATIVE_COMPARE_MAPPING | recipe=" + recipe + " | phase=" + phase
                     + " | side=" + side + " | seed_iso=" + _iso[side] + " | mapping=NOT_VERIFIED_MISSING_OR_DUPLICATE_NATURAL_SIDE");
                 continue;
             }
@@ -81,7 +81,7 @@ internal sealed class NativeCompareSideBinding
             var expectedPair = startDistances[side] <= input.Tolerance && endDistances[next] <= input.Tolerance ? "FORWARD"
                 : startDistances[next] <= input.Tolerance && endDistances[side] <= input.Tolerance ? "REVERSED" : "MOVED_OR_REPARAMETERIZED";
             var trim = Trim(edge);
-            RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_MAPPING | recipe=" + recipe + " | phase=" + phase
+            write("SMARTSKIN_NATIVE_COMPARE_MAPPING | recipe=" + recipe + " | phase=" + phase
                 + " | side=" + side + " | relation=" + NativeCompareProbeProtocol.Relation(side)
                 + " | seed_iso=" + _iso[side] + " | current_iso=" + trim.IsoStatus
                 + " | candidate_edge=" + edge.EdgeIndex + " | candidate_trim=" + trim.TrimIndex

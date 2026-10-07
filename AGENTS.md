@@ -115,3 +115,11 @@ dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --
 - Preserve copied parent BrepEdge context. Report native and logical endpoint/domain directions, selected target trim provenance and candidate correspondence. Reversal variants are diagnostic probes, not a guarantee that compound target directions are normalized.
 - Measure every logical side before and after each attempt, with direction, unresolved correspondence and finite-sampling limitations explicit. Requested G2, returned=true and a nonempty edge-coverage counter are not a verified attachment.
 - Keep source/copy integrity, read-only disposal, unchanged Build/installer behavior and exact-SHA Windows CI delivery. Do not publish private model coordinates or field files.
+
+## P08E1N3 complete local diagnostic report
+
+- Version `0.0.24-p08e1n3` adds direct command-owned report capture and a local UTF-8 TXT save flow. Preserve N2 construction, Match settings, measurement algorithms and read-only geometry behavior.
+- Capture before selection and retain success, failure, cancellation and final cleanup. Do not scrape Rhino's finite command-history buffer or intercept unrelated global output.
+- Show one folder chooser after native cleanup; saving and dialog time must not consume the native-work budget. Picker cancellation and file errors retain the last completed report for `SmartSkinNativeReport` without rerunning geometry.
+- Use collision-safe file creation, explicit completeness/error status and bounded capture with a reserved final cleanup/status tail. Never silently overwrite an existing file or label a truncated report complete. Do not upload reports automatically.
+- Preserve exact-SHA Windows CI, tested installation and the distinction between managed file-writing tests and unverified native folder-dialog behavior.
