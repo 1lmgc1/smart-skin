@@ -85,7 +85,9 @@ internal sealed class NativeBuildDocumentAdapter : NativeBuildTransaction.IDocum
         if (!Convert.FromBase64String(_input.GeometryFingerprint(copy)).SequenceEqual(confirmed.CandidateArchive))
             throw new InvalidOperationException("BUILD_ADD_COPY_ARCHIVE_MISMATCH");
         _plannedId = objectId; _marker = transactionMarker; _insideAdd = true;
-        try { return _document.Objects.AddBrep(copy, attributes); }
+        // Preserve the exact qualified cap. Rhino's shorter overload delegates kink splitting
+        // to native defaults, which can change topology and invalidate the sealed readback.
+        try { return _document.Objects.AddBrep(copy, attributes, null, false, false); }
         finally { _insideAdd = false; }
     }
     public IReadOnlyList<NativeBuildTransaction.CreatedCap> InspectInsertion(ulong documentSerial, Guid plannedId, Guid transactionMarker)
@@ -147,7 +149,9 @@ internal sealed class NativeBuildDocumentAdapter : NativeBuildTransaction.IDocum
     }
     private void DocumentClosed(object? sender, DocumentEventArgs args)
     { if (args.DocumentSerialNumber == _document.RuntimeSerialNumber) _controller.Invalidate(); }
-    private void ActiveDocumentChanged(object? sender, DocumentEventArgs args) => _controller.Invalidate();
+    private void ActiveDocumentChanged(object? sender, DocumentEventArgs args) => _controller.DocumentContextChanged(
+        args.DocumentSerialNumber == _document.RuntimeSerialNumber && RhinoDoc.ActiveDoc?.RuntimeSerialNumber == _document.RuntimeSerialNumber,
+        _document.IsClosing);
     public void Dispose()
     {
         RhinoDoc.AddRhinoObject -= Added;

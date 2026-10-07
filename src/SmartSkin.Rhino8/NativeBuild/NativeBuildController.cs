@@ -26,10 +26,21 @@ internal sealed class NativeBuildController
         if (Current != Phase.Ready || !_freshInput) return false;
         _freshInput = false; Current = Phase.Confirming; return true;
     }
+    // A deliberately clicked visible Create button is its own confirmation event.
+    // It needs a prepared immutable candidate, but never the keyboard release barrier.
+    internal bool BeginButtonConfirmation()
+    {
+        if (Current != Phase.AwaitingFreshInput && Current != Phase.Ready) return false;
+        _freshInput = false; Current = Phase.Confirming; return true;
+    }
     internal void Cancel()
     {
         if (Current == Phase.Committed) return;
         _freshInput = false; Current = Phase.Cancelled;
+    }
+    internal void DocumentContextChanged(bool sameDocument, bool closing)
+    {
+        if (!sameDocument || closing) Invalidate();
     }
     internal void Invalidate()
     {

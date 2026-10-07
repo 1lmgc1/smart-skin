@@ -18,6 +18,8 @@ internal static class NativeBuildWorkflow
     {
         var report = new NativeCompareReportBuffer(DateTime.UtcNow, Guid.NewGuid().ToString("N"));
         var result = Result.Failure;
+        var failureReason = string.Empty;
+        var createdId = Guid.Empty;
         NativeCompareReportCapture.Run(report, NativeCompareReportExport.Store, NativeCompareReportExport.Message, write =>
         {
             var identity = BuildIdentity.FromAssembly(typeof(SmartSurfaceBuildCommand).Assembly);
@@ -27,14 +29,40 @@ internal static class NativeBuildWorkflow
                 + " | model_units=" + document.ModelUnitSystem + " | absolute_tolerance=" + NativeCompareProbeProtocol.Number(document.ModelAbsoluteTolerance)
                 + " | angle_tolerance_radians=" + NativeCompareProbeProtocol.Number(document.ModelAngleToleranceRadians)
                 + " | user_status=" + NativeBuildCapQualification.UserStatus + " | run_mode=" + mode);
-            result = Execute(document, mode, write); return result.ToString();
+            result = Execute(document, mode, write, out failureReason, out createdId); return result.ToString();
         });
-        NativeCompareReportExport.ChooseFolderAndSave(document, mode, report);
+        // Functional Build ends in a surface or a visible reason. The complete report is
+        // retained in-session and can be saved explicitly with SmartSkinNativeReport.
+        if (result == Result.Failure && mode == RunMode.Interactive)
+            Rhino.UI.Dialogs.ShowMessage("Поверхность не создана.\n" + FailureDescription(failureReason), "Smart Skin");
+        else if (result == Result.Success && createdId != Guid.Empty)
+        {
+            // Presentation follows the completed transaction and native cleanup. It cannot
+            // roll back a valid cap, and never changes any existing object's selection.
+            try { document.Objects.Select(createdId); } catch { }
+            try { document.Views.Redraw(); } catch { }
+            try { RhinoApp.WriteLine("Поверхность создана. Добавлен 1 объект. Undo отменяет добавление."); } catch { }
+        }
         return result;
     }
 
-    private static Result Execute(RhinoDoc doc, RunMode mode, Action<string> write)
+    private static string FailureDescription(string reason)
     {
+        if (reason.StartsWith("BUILD_ROLLBACK_INCOMPLETE", StringComparison.Ordinal))
+            return "Не удалось завершить добавление и полностью отменить его. Проверьте новую поверхность в модели.\n" + reason;
+        if (reason.Contains("UNDO")) return "Запись Undo недоступна; добавление остановлено.\n" + reason;
+        if (reason.Contains("JOIN") || reason.Contains("BOUNDARY") || reason.Contains("SEAM"))
+            return "Не удалось подтвердить стыковку новой поверхности со всеми выбранными рёбрами.\n" + reason;
+        if (reason.Contains("NONREGULAR") || reason.Contains("RANK") || reason.Contains("VALIDITY"))
+            return "Кандидат не прошёл проверку корректности поверхности.\n" + reason;
+        if (reason.Contains("CHANGED") || reason.Contains("MISMATCH"))
+            return "Модель или подготовленный кандидат изменились; добавление остановлено.\n" + reason;
+        return string.IsNullOrEmpty(reason) ? "Операция завершилась ошибкой до добавления." : reason;
+    }
+
+    private static Result Execute(RhinoDoc doc, RunMode mode, Action<string> write, out string failureReason, out Guid createdId)
+    {
+        failureReason = string.Empty; createdId = Guid.Empty;
         var beforeCount = RhinoDocumentMetrics.ActiveObjectCount(doc);
         NativeCompareInput? input = null; NativeSeedJoinResult? join = null;
         NativeCompareCandidate? candidate = null; NativeBuildDocumentAdapter? adapter = null;
@@ -42,7 +70,8 @@ internal static class NativeBuildWorkflow
         var controller = new NativeBuildController();
         var watch = new Stopwatch(); long lastPump = -50;
         NativeBuildTransaction.Result? transaction = null;
-        void Escape(object? sender, EventArgs args) => controller.Cancel();
+        void Escape(object? sender, EventArgs args)
+        { controller.Cancel(); form?.Cancel(); }
         void Keyboard(int key)
         {
             if (key == 16 || key == 17 || key == 18 || key == 91 || key == 92)
@@ -98,19 +127,23 @@ internal static class NativeBuildWorkflow
             form = new NativeBuildStatusForm(doc, controller); form.Show();
             mouse = new NativeBuildMouseConfirmation(doc, controller) { Enabled = true };
             RhinoApp.KeyboardEvent += Keyboard;
-            controller.Prepared(); doc.Views.Redraw();
+            controller.Prepared(); form.Prepared(); doc.Views.Redraw();
             write("SMARTSKIN_NATIVE_BUILD_PREVIEW | prepared_ms=" + watch.ElapsedMilliseconds
                 + " | cached_meshes=" + candidate.Meshes.Length + " | user_status=" + NativeBuildCapQualification.UserStatus
-                + " | confirmation=RELEASE_THEN_FRESH_POST_READY_INPUT | physical_state=WINDOWS_CURRENT_HIGH_BIT | commit_geometry=ISOLATED_CAP_ONLY | G1_G2=NOT_VERIFIED");
+                + " | confirmation=EXPLICIT_CREATE_BUTTON_OR_RELEASE_THEN_FRESH_INPUT | physical_state=WINDOWS_CURRENT_HIGH_BIT | commit_geometry=ISOLATED_CAP_ONLY | G1_G2=NOT_VERIFIED");
             using var decision = new GetOption();
-            decision.SetCommandPrompt("Smart Skin: Enter/Space/правая кнопка — добавить; Esc — отменить");
+            decision.SetCommandPrompt("Smart Skin: «Создать поверхность» или Enter/Space/правая кнопка; Esc — отменить");
             decision.AcceptNothing(true); decision.SetWaitDuration(100);
             while (controller.Current != NativeBuildController.Phase.Confirming)
             {
-                if (controller.Cancelled || !form.Visible || doc.IsClosing) return Result.Cancel;
+                if (controller.Current == NativeBuildController.Phase.Invalidated || doc.IsClosing)
+                    throw new NativeCompareUnsupported("BUILD_MODEL_CHANGED_DURING_PREVIEW");
+                if (controller.Cancelled || !form.Visible) return Result.Cancel;
                 if (!adapter.PreviewMetadataCurrent(displayed))
-                { controller.Invalidate(); return Result.Cancel; }
+                { controller.Invalidate(); throw new NativeCompareUnsupported("BUILD_MODEL_CHANGED_DURING_PREVIEW"); }
                 var answer = decision.Get();
+                if (controller.Current == NativeBuildController.Phase.Invalidated)
+                    throw new NativeCompareUnsupported("BUILD_MODEL_CHANGED_DURING_PREVIEW");
                 if (controller.Cancelled || !form.Visible) return Result.Cancel;
                 if (controller.Current == NativeBuildController.Phase.Confirming) break;
                 if (answer == GetResult.Timeout)
@@ -124,17 +157,23 @@ internal static class NativeBuildWorkflow
                 controller.Cancel(); return Result.Cancel;
             }
             transaction = NativeBuildTransaction.Run(adapter, new NativeBuildTransaction.Confirmation(displayed), adapter.Acceptance(displayed));
-            if (transaction.Status == NativeBuildTransaction.Outcome.Added) controller.Added();
+            if (transaction.Status == NativeBuildTransaction.Outcome.Added)
+            { controller.Added(); createdId = transaction.AddedObjectId; }
+            else failureReason = transaction.Cleanup == NativeBuildTransaction.Rollback.Incomplete
+                ? "BUILD_ROLLBACK_INCOMPLETE: " + transaction.Reason : transaction.Reason;
             write("SMARTSKIN_NATIVE_BUILD_TRANSACTION | status=" + transaction.Status + " | reason=" + transaction.Reason
                 + " | added_id=" + transaction.AddedObjectId + " | add_attempted=" + transaction.AddAttempted
                 + " | rollback=" + transaction.Cleanup + " | parent_replacements=0 | user_status=" + NativeBuildCapQualification.UserStatus);
             return transaction.Status == NativeBuildTransaction.Outcome.Added ? Result.Success
-                : transaction.Status == NativeBuildTransaction.Outcome.Cancelled ? Result.Cancel : Result.Failure;
+                : transaction.Status == NativeBuildTransaction.Outcome.Cancelled && controller.Current != NativeBuildController.Phase.Invalidated
+                    ? Result.Cancel : Result.Failure;
         }
         catch (OperationCanceledException) { write("SMARTSKIN_NATIVE_BUILD_END | status=CANCELLED"); return Result.Cancel; }
-        catch (NativeCompareUnsupported error) { write("SMARTSKIN_NATIVE_BUILD_END | status=" + error.Message); return Result.Failure; }
+        catch (NativeCompareUnsupported error)
+        { failureReason = error.Message; write("SMARTSKIN_NATIVE_BUILD_END | status=" + error.Message); return Result.Failure; }
         catch (Exception error)
         {
+            failureReason = error.GetType().Name + ": " + error.Message;
             write("SMARTSKIN_NATIVE_BUILD_END | status=" + (transaction?.Status == NativeBuildTransaction.Outcome.Added ? "ADDED_REPORT_ERROR" : "FAILED")
                 + " | type=" + error.GetType().Name);
             return transaction?.Status == NativeBuildTransaction.Outcome.Added ? Result.Success : Result.Failure;

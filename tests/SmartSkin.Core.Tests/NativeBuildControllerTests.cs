@@ -116,6 +116,46 @@ public sealed class NativeBuildControllerTests
         flow.IdleGetCycle(true, true); Assert.False(flow.BeginConfirmation());
         flow.ConfirmationInput(); Assert.True(flow.BeginConfirmation());
     }
+    [Fact]
+    public void ExplicitCreateButtonCommitsPreparedPreviewWithoutPhysicalReleaseBarrier()
+    {
+        var flow = new NativeBuildController(); flow.Prepared(); flow.IdleGetCycle(false, false);
+        Assert.True(flow.BeginButtonConfirmation());
+        Assert.Equal(NativeBuildController.Phase.Confirming, flow.Current);
+        Assert.False(flow.BeginButtonConfirmation());
+    }
+    [Fact]
+    public void CreateButtonCannotAcceptUnpreparedCancelledOrInvalidatedPreview()
+    {
+        var preparing = new NativeBuildController(); Assert.False(preparing.BeginButtonConfirmation());
+        var cancelled = Ready(); cancelled.Cancel(); Assert.False(cancelled.BeginButtonConfirmation());
+        var stale = Ready(); stale.Invalidate(); Assert.False(stale.BeginButtonConfirmation());
+        var committed = Ready(); Assert.True(committed.BeginButtonConfirmation()); committed.Added();
+        Assert.False(committed.BeginButtonConfirmation());
+    }
+    [Fact]
+    public void CancellationAfterButtonClickStillCancelsBeforeOrDuringTransaction()
+    {
+        var flow = Ready(); Assert.True(flow.BeginButtonConfirmation()); flow.Cancel(); flow.Added();
+        Assert.True(flow.Cancelled); Assert.Equal(NativeBuildController.Phase.Cancelled, flow.Current);
+    }
+    [Fact]
+    public void SameDocumentContextRefreshDoesNotInvalidatePreparedReceipt()
+    {
+        var flow = Ready(); var generation = flow.Generation;
+        flow.DocumentContextChanged(true, false);
+        Assert.Equal(generation, flow.Generation); Assert.Equal(NativeBuildController.Phase.Ready, flow.Current);
+        Assert.True(flow.BeginButtonConfirmation());
+    }
+    [Fact]
+    public void ActualDocumentSwitchOrCloseRemainsPermanentlyStale()
+    {
+        var switched = Ready(); switched.DocumentContextChanged(false, false);
+        switched.DocumentContextChanged(true, false); switched.IdleGetCycle();
+        Assert.False(switched.BeginButtonConfirmation()); Assert.Equal(NativeBuildController.Phase.Invalidated, switched.Current);
+        var closed = Ready(); closed.DocumentContextChanged(true, true);
+        Assert.False(closed.BeginButtonConfirmation());
+    }
     private static NativeBuildController Ready()
     {
         var flow = new NativeBuildController(); flow.Prepared(); flow.IdleGetCycle(); return flow;
