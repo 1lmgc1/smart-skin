@@ -197,9 +197,10 @@ internal static class NativeSupportMeasure
     internal static bool TryFrame(Surface surface, double u, double v, out NativeCompareMeasure.SurfaceFrame frame)
     {
         frame = new NativeCompareMeasure.SurfaceFrame();
-        var normal = surface.NormalAt(u, v);
         var curvature = surface.CurvatureAt(u, v);
-        if (!normal.Unitize() || curvature is null) return false;
+        if (curvature is null) return false;
+        var normal = curvature.Normal;
+        if (!normal.Unitize()) return false;
         var a = curvature.Direction(0); var b = curvature.Direction(1);
         var ka = curvature.Kappa(0); var kb = curvature.Kappa(1);
         if (!a.Unitize() || !b.Unitize() || !NativeCompareMath.Finite(ka) || !NativeCompareMath.Finite(kb)

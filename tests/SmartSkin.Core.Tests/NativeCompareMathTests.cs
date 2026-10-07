@@ -8,6 +8,39 @@ namespace SmartSkin.Core.Tests;
 public sealed class NativeCompareMathTests
 {
     [Fact]
+    public void AnalyticPlaneAndCylinderFramesKeepNormalAndOperatorParityTogether()
+    {
+        // Analytic references, not native Rhino calls. Plane has W=0; a radius2
+        // cylinder has one principal curvature of magnitude1/2 and one zero.
+        var s = Math.Sqrt(0.5);
+        foreach (var curvature in new[] { 0.0, -0.5 })
+            foreach (var reversedA in new[] { false, true })
+                foreach (var reversedB in new[] { false, true })
+                {
+                    var aNormal = new[] { s, 0.0, s }; var bNormal = new[] { s, 0.0, s };
+                    var a = NativeCompareMath.Operator(curvature, new[] { 0.0, 1, 0 }, 0, new[] { s, 0.0, -s }, 1);
+                    var b = (double[])a.Clone();
+                    NativeCompareMath.ApplyFaceOrientation(aNormal, a, reversedA);
+                    NativeCompareMath.ApplyFaceOrientation(bNormal, b, reversedB);
+                    var dot = aNormal[0] * bNormal[0] + aNormal[1] * bNormal[1] + aNormal[2] * bNormal[2];
+                    Assert.Equal(0, NativeCompareMath.OperatorSpectralResidual(a, b, dot < 0 ? -1 : 1), 12);
+                }
+    }
+
+    [Fact]
+    public void MixedNormalConventionProducesFalseTwiceCurvatureResidual()
+    {
+        var cylinder = NativeCompareMath.Operator(-0.5, new[] { 1.0, 0, 0 }, 0, new[] { 0.0, 1, 0 }, 1);
+        var reversed = (double[])cylinder.Clone(); var normal = new[] { 0.0, 0, 1 };
+        NativeCompareMath.ApplyFaceOrientation(normal, reversed, true);
+        Assert.Equal(-1, normal[2]);
+        Assert.Equal(0, NativeCompareMath.OperatorSpectralResidual(cylinder, reversed, -1), 12);
+        // A double-flipped normal would incorrectly select +1 alignment while W
+        // was flipped only once, producing2/R rather than zero.
+        Assert.Equal(1, NativeCompareMath.OperatorSpectralResidual(cylinder, reversed, 1), 12);
+    }
+
+    [Fact]
     public void DetectsMixedCurvatureInvisibleToOneAcrossDirection()
     {
         var r = Math.Sqrt(0.5);

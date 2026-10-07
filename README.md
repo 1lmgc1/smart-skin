@@ -1,8 +1,8 @@
-# Smart Skin — P08E1N4 native support and trim experiment
+# Smart Skin — P08E1N5 first-candidate native Join check
 
-Rhino8.21+ / Windows. Version **0.0.25-p08e1n4**.
+Rhino8.21+ / Windows. Version **0.0.26-p08e1n5**.
 
-N4 adds stable logical-corner ordering and a bounded native support/trim experiment to `SmartSkinNativeCompare`. It tests original source incidence and parent jets before splitting only a new surface, then checks the actual trimmed boundary. See [scope and field instructions](docs/P08E1N4_SUPPORT_TRIM.md). Ordinary Build, Python geometry and installer algorithms remain unchanged; this is not a completed replacement for the slow Build path. The full TXT folder-save/retry flow from N3 is retained.
+N5 makes `SmartSkinNativeCompare` test the first EdgeSrf seed with one native Join on fresh copies of the complete parent Breps. It reports output topology, selected seam coverage and unresolved provenance, with a read-only joined seed-face preview. See [scope and field instructions](docs/P08E1N5_SEED_JOIN.md). Join is separate from G1/G2; ordinary Build and its Python runtime remain unchanged. The full TXT save/retry flow is retained.
 
 This experimental field candidate repairs compound-edge recognition and constructs a boundary-preserving native skin with selectable U/V guide handles. Original source objects remain unchanged. Upper source corners may be hard at the two explicitly identified vertices; finite source intervals and generated joins receive no continuity exemption. Whole-skin numerical construction, selected-handle regressions and the bounded cap-cap screen pass. The actual Rhino owner-screen and interactive workflow remain a field-test boundary. Delivery requires successful exact-SHA Windows CI and its unchanged verified install ZIP.
 

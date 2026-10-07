@@ -81,11 +81,11 @@ public sealed class SmartSkinNativeCompareCommand : Command
             watch.Start();
             RhinoApp.EscapeKeyPressed += Escape;
             write("SMARTSKIN_NATIVE_COMPARE_START | version=" + identity.Version + " | commit=" + identity.Commit
-                + " | experimental=true | document_additions=0 | requested=G2 | average=false"
-                + " | protocol=INDEPENDENT_MATCH_SUPPORT_TRIM_LOCAL | target_side=0 | independent_seed_copies=true"
-                + " | max_initial_construction_calls=" + NativeCompareProbeProtocol.MaximumConstructionCalls
-                + " | max_support_blend_calls=1 | max_new_support_split_calls=2 | support_trim_experiment=true" + " | budget_ms=" + BudgetMilliseconds
-                + " | cancellation=BETWEEN_NATIVE_CALLS | upper_point_policy=EXACT_IDENTIFIED_SOURCE_ROLE_POINTS_ONLY | global_G2=NOT_VERIFIED");
+                + " | experimental=true | document_additions=0 | requested=TOPOLOGY_AND_G0_ONLY | average=NOT_APPLICABLE"
+                + " | protocol=FIRST_SEED_JOIN_ONLY | candidate=EdgeSrf:Seed | fresh_join_copies=true"
+                + " | max_initial_construction_calls=" + 1
+                + " | max_join_calls=1 | match_calls=0 | blend_calls=0 | split_calls=0" + " | budget_ms=" + BudgetMilliseconds
+                + " | cancellation=BETWEEN_NATIVE_CALLS | join_point_exemptions=NONE | global_G2=NOT_VERIFIED");
             input = NativeCompareInput.Capture(doc, selection, Checkpoint);
             write("SMARTSKIN_NATIVE_COMPARE_PLAN | ordered_cells=1 | logical_sides=4 | native_edges=" + input.Edges.Count
                 + " | owner_count=" + input.Owners.Count + " | derivation=" + input.Derivation + " | knot_features=false"
@@ -98,7 +98,7 @@ public sealed class SmartSkinNativeCompareCommand : Command
                     + " | feature_exceptions=NONE_GRANTED");
 
             NativeCompareSideBinding.TraceSources(input, write);
-            RunFirstMatchProbe(input, candidates, Checkpoint, write);
+            RunSeedJoinProbe(input, candidates, Checkpoint, write);
             if (!input.SourcesUnchanged(doc)) throw new NativeCompareUnsupported("SOURCE_ARCHIVE_CHANGED");
             write("SMARTSKIN_NATIVE_COMPARE_BUILD_END | elapsed_ms=" + watch.ElapsedMilliseconds
                 + " | preview_candidates=" + candidates.Count + " | global_G2=NOT_VERIFIED");
@@ -141,12 +141,15 @@ public sealed class SmartSkinNativeCompareCommand : Command
                 allCandidatesDisposed &= NativeCompareReportCleanup.Attempt("candidate", candidate.Dispose, cleanupFailures);
             var unchanged = false;
             NativeCompareReportCleanup.Attempt("source_snapshot", () => unchanged = input?.SourcesUnchanged(doc) ?? false, cleanupFailures);
+            var copiesUnchanged = false;
+            NativeCompareReportCleanup.Attempt("copy_snapshot", () => copiesUnchanged = input?.CopiesUnchanged() ?? false, cleanupFailures);
             var inputDisposed = NativeCompareReportCleanup.Attempt("input", () => input?.Dispose(), cleanupFailures);
             NativeCompareReportCleanup.Attempt("redraw", () => doc.Views.Redraw(), cleanupFailures);
             var afterCount = "NOT_VERIFIED";
             NativeCompareReportCleanup.Attempt("object_count", () => afterCount = RhinoDocumentMetrics.ActiveObjectCount(doc).ToString(), cleanupFailures);
             write("SMARTSKIN_NATIVE_COMPARE_CLEANUP | document_objects=" + objectCount + "->" + afterCount
                 + " | source_archive=" + (unchanged ? "VERIFIED_UNCHANGED" : "NOT_VERIFIED")
+                + " | captured_copy_archive=" + (copiesUnchanged ? "VERIFIED_UNCHANGED" : "NOT_VERIFIED")
                 + " | all_candidates_disposed=" + allCandidatesDisposed + " | input_disposed=" + inputDisposed
                 + " | cleanup_failures=" + (cleanupFailures.Count == 0 ? "NONE" : string.Join(",", cleanupFailures))
                 + " | added=0 | replaced=0");
@@ -162,6 +165,24 @@ public sealed class SmartSkinNativeCompareCommand : Command
             return Brep.CreateEdgeSurface(curves) ?? throw new NativeCompareUnsupported("NATIVE_EDGESRF_RETURNED_NULL");
         }
         finally { foreach (var curve in curves) curve.Dispose(); }
+    }
+
+    private static void RunSeedJoinProbe(NativeCompareInput input, List<NativeCompareCandidate> candidates, Action checkpoint, Action<string> write)
+    {
+        checkpoint();
+        var watch = Stopwatch.StartNew();
+        using var seed = EdgeSeed(input);
+        var seedMilliseconds = watch.ElapsedMilliseconds;
+        if (!input.CopiesUnchanged()) throw new InvalidOperationException("COPIED_NATIVE_TARGET_CHANGED");
+        checkpoint();
+        if (!NativeCompareMeasure.Bounded(seed, out _)) throw new NativeCompareUnsupported("INVALID_OR_OVER_LIMIT_NATIVE_SEED");
+        var binding = NativeCompareSideBinding.CaptureSeed(seed, input);
+        write("SMARTSKIN_NATIVE_COMPARE_STEP | recipe=EdgeSrfSeed | phase=Seed | construction_ms=" + seedMilliseconds
+            + " | next=ONE_JOIN_WITH_FULL_OWNER_COPIES | later_recipes=NONE");
+        NativeCompareMeasure.ReportSides("EdgeSrfSeed", "Seed", seed, input, binding, checkpoint, write);
+        AddPreviewCopy("EdgeSrf:Seed:NOT_VERIFIED", seed, candidates);
+        NativeSeedJoinExperiment.Run(seed, input, candidates, checkpoint, write);
+        if (!input.CopiesUnchanged()) throw new InvalidOperationException("COPIED_NATIVE_TARGET_CHANGED");
     }
 
     private static void RunFirstMatchProbe(NativeCompareInput input, List<NativeCompareCandidate> candidates, Action checkpoint, Action<string> write)

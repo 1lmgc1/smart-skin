@@ -5,6 +5,16 @@ namespace SmartSkin.Rhino8;
 /// <summary>Physical ambient Weingarten operator arithmetic, independent of parameterization.</summary>
 internal static class NativeCompareMath
 {
+    internal static void ApplyFaceOrientation(double[] normal, double[] shapeOperator, bool reversed)
+    {
+        // Both inputs belong to the SAME signed principal-curvature evaluation.
+        // Never combine an independently face-oriented NormalAt result with raw curvature.
+        if (normal.Length != 3 || shapeOperator.Length != 9) throw new ArgumentException("A 3D normal and full3x3 operator are required.");
+        if (!reversed) return;
+        for (var i = 0; i < normal.Length; i++) normal[i] = -normal[i];
+        for (var i = 0; i < shapeOperator.Length; i++) shapeOperator[i] = -shapeOperator[i];
+    }
+
     internal static double[] Operator(double k0, double[] d0, double k1, double[] d1, double sign)
     {
         var result = new double[9];

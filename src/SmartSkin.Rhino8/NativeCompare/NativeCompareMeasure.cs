@@ -55,18 +55,21 @@ internal static class NativeCompareMeasure
         if (face is null || !trim.GetTrimParameter(parameter, out var t)) return false;
         var uv = trim.PointAt(t);
         if (!uv.IsValid || face.PointAt(uv.X, uv.Y).DistanceTo(edge.PointAt(parameter)) > tolerance) return false;
-        var normal = face.NormalAt(uv.X, uv.Y);
-        if (face.OrientationIsReversed) normal.Reverse();
-        if (!normal.Unitize()) return false;
         var curvature = face.CurvatureAt(uv.X, uv.Y);
         if (curvature is null) return false;
+        // NormalAt can already include BrepFace parity in native Rhino. Curvature.Normal,
+        // Kappa and Direction are one coherent underlying-surface evaluation.
+        var normal = curvature.Normal;
+        if (!normal.Unitize()) return false;
         var d0 = curvature.Direction(0); var d1 = curvature.Direction(1);
         var k0 = curvature.Kappa(0); var k1 = curvature.Kappa(1);
         if (!d0.Unitize() || !d1.Unitize() || !NativeCompareMath.Finite(k0) || !NativeCompareMath.Finite(k1)
             || Math.Abs(d0 * d1) > 1e-5 || Math.Abs(d0 * normal) > 1e-5 || Math.Abs(d1 * normal) > 1e-5) return false;
-        frame.Normal = normal;
+        var normalComponents = new[] { normal.X, normal.Y, normal.Z };
         frame.Operator = NativeCompareMath.Operator(k0, new[] { d0.X, d0.Y, d0.Z }, k1,
-            new[] { d1.X, d1.Y, d1.Z }, face.OrientationIsReversed ? -1 : 1);
+            new[] { d1.X, d1.Y, d1.Z }, 1);
+        NativeCompareMath.ApplyFaceOrientation(normalComponents, frame.Operator, face.OrientationIsReversed);
+        frame.Normal = new Vector3d(normalComponents[0], normalComponents[1], normalComponents[2]);
         frame.Norm = Math.Sqrt(k0 * k0 + k1 * k1);
         return frame.Operator.All(NativeCompareMath.Finite);
     }

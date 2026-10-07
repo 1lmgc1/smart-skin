@@ -20,6 +20,7 @@
     <Compile Include="..\..\src\SmartSkin.Rhino8\NativeCompare\NativeCompareReportBuffer.cs" Link="NativeCompareReportBuffer.cs" />
     <Compile Include="..\..\src\SmartSkin.Rhino8\NativeCompare\NativeCompareCornerOrdering.cs" Link="NativeCompareCornerOrdering.cs" />
     <Compile Include="..\..\src\SmartSkin.Rhino8\NativeCompare\NativeSupportTrimPolicy.cs" Link="NativeSupportTrimPolicy.cs" />
+    <Compile Include="..\..\src\SmartSkin.Rhino8\NativeCompare\NativeSeedJoinPolicy.cs" Link="NativeSeedJoinPolicy.cs" />
     <ProjectReference Include="..\..\src\SmartSkin.Core\SmartSkin.Core.csproj" />
   </ItemGroup>
 </Project>

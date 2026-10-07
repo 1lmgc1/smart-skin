@@ -131,3 +131,10 @@ dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --
 - Only specifically role-bound upper source points retain the existing exception. No finite band, lower point or internal junction is exempt. Preserve original parents and their trims strictly.
 - Split only a new support using the original finite 3D source curves. Inspect actual trim loops, unique complete region correspondence and both directions of original-boundary coverage, then recheck the actual trimmed boundary and parent jets. No projected/extruded cutters, largest-fragment choice, raised tolerance or hidden fallback.
 - Keep support precheck, trimming and final recheck outcomes separate. This diagnostic has no Add/accept path; finite screens do not certify global G2, branch uniqueness or separation. Preserve the N3 TXT flow, Python runtime, installer algorithms and exact-SHA Windows CI pipeline.
+
+## P08E1N5 first-seed Join diagnostic
+
+- Version `0.0.26-p08e1n5` focuses the native diagnostic on the first EdgeSrf seed and one JoinBreps call using fresh full parent copies. No further Match/Blend/trim recipe runs in this path. Do not reinterpret the requested Join test as permission for a G0-only production replacement.
+- Report native outputs before separately qualifying face provenance and selected-opening coverage. Require ordinary seed/correct-parent paired seams and both directions of sampled original-boundary coverage; selected naked overlap or nonmanifold topology cannot receive a positive label. Distinguish unrelated original openings.
+- Obtain diagnostic normal and principal curvature from one SurfaceCurvature result, then apply face orientation to N and W together. Do not mix NormalAt's face convention with separately signed curvature. Physical tolerances and native construction settings remain unchanged.
+- Keep original/captured-copy integrity checks, read-only seed and joined-seed-face previews, complete TXT reporting and cleanup. No Add/Replace, forced join, parent trim/rebuild or tolerance increase. Exact-SHA Windows CI and artifact verification remain mandatory.
