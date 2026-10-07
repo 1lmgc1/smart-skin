@@ -51,7 +51,8 @@ public sealed class SmartSkinNativeCompareCommand : Command
         RhinoApp.EscapeKeyPressed += Escape;
         RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_START | version=" + identity.Version + " | commit=" + identity.Commit
             + " | experimental=true | document_additions=0 | requested=G2 | average=false"
-            + " | max_construction_calls=11 | budget_ms=" + BudgetMilliseconds
+            + " | protocol=N2_FIRST_MATCH_REVERSAL | target_side=0 | independent_seed_copies=true"
+            + " | max_construction_calls=" + NativeCompareProbeProtocol.MaximumConstructionCalls + " | budget_ms=" + BudgetMilliseconds
             + " | cancellation=BETWEEN_NATIVE_CALLS | upper_exceptions=NONE_GRANTED | global_G2=NOT_VERIFIED");
         try
         {
@@ -66,21 +67,8 @@ public sealed class SmartSkinNativeCompareCommand : Command
                     + " | within_chain_G1_features=" + input.Sides[side].Sum(e => e.Features.Count)
                     + " | feature_exceptions=NONE_GRANTED");
 
-            // Data-derived eligibility priority: measure an available natural-parent blend before
-            // spending the shared soft budget on a four-Match edge seed. No shape ranking/search.
-            var priorityPairs = Enumerable.Range(0, 2).Where(pair => NaturalBlendPair(input, pair)).ToArray();
-            RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_ORDER | priority=ELIGIBLE_NATURAL_PARENT_BLEND"
-                + " | priority_pairs=" + string.Join(",", priorityPairs) + " | remainder=EDGESRF_THEN_OTHER_BLEND");
-            foreach (var pair in priorityPairs)
-                RunRecipe("Blend" + pair + "Match", () => BlendSeed(input, pair),
-                    new[] { (pair + 1) % 4, (pair + 3) % 4 }, input, candidates, Checkpoint);
-            RunRecipe("EdgeSrfMatch", () => EdgeSeed(input), new[] { 0, 2, 1, 3 }, input, candidates, Checkpoint);
-            foreach (var pair in Enumerable.Range(0, 2).Except(priorityPairs))
-                RunRecipe("Blend" + pair + "Match", () => BlendSeed(input, pair),
-                    new[] { (pair + 1) % 4, (pair + 3) % 4 }, input, candidates, Checkpoint);
-            RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_RECIPE | recipe=NetworkSurface"
-                + " | status=UNSUPPORTED_MISSING_VALID_PARENT_AWARE_CROSSING_NETWORK"
-                + " | guide_geometry=NONE_INVENTED");
+            NativeCompareSideBinding.TraceSources(input);
+            RunFirstMatchProbe(input, candidates, Checkpoint);
             if (!input.SourcesUnchanged(doc)) throw new NativeCompareUnsupported("SOURCE_ARCHIVE_CHANGED");
             RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_BUILD_END | elapsed_ms=" + watch.ElapsedMilliseconds
                 + " | preview_candidates=" + candidates.Count + " | global_G2=NOT_VERIFIED");
@@ -134,131 +122,99 @@ public sealed class SmartSkinNativeCompareCommand : Command
         finally { foreach (var curve in curves) curve.Dispose(); }
     }
 
-    private static bool NaturalBlendPair(NativeCompareInput input, int pair)
+    private static void RunFirstMatchProbe(NativeCompareInput input, List<NativeCompareCandidate> candidates, Action checkpoint)
     {
-        return new[] { pair, pair + 2 }.All(side => input.Sides[side].Count == 1
-            && BoundaryMatchVerifier.IsNaturalBoundary(input.Sides[side][0].Native)
-            && NativeCompareMeasure.Face(input.Sides[side][0].Native)?.IsPlanar(input.Tolerance) == false);
-    }
-
-    private static Brep BlendSeed(NativeCompareInput input, int pair)
-    {
-        var a = input.Sides[pair]; var b = input.Sides[pair + 2];
-        if (a.Count != 1 || b.Count != 1)
-            throw new NativeCompareUnsupported("UNSUPPORTED_NATIVE_COMPOUND_CHAIN_BINDING;logical_recipe=BLEND_OPPOSING_SIDES");
-        var ea = a[0]; var eb = b[0];
-        var fa = NativeCompareMeasure.Face(ea.Native); var fb = NativeCompareMeasure.Face(eb.Native);
-        if (fa is null || fb is null || !ea.Native.Domain.IsValid || !eb.Native.Domain.IsValid)
-            throw new NativeCompareUnsupported("UNSUPPORTED_BLEND_PARENT_OR_DOMAIN");
-        var breps = Brep.CreateBlendSurface(fa, ea.Native, ea.Native.Domain, ea.Reverse, BlendContinuity.Curvature,
-            fb, eb.Native, eb.Native.Domain, !eb.Reverse, BlendContinuity.Curvature);
-        if (breps is null || breps.Length == 0) throw new NativeCompareUnsupported("NATIVE_BLEND_RETURNED_EMPTY");
-        if (breps.Length != 1)
+        checkpoint();
+        var watch = Stopwatch.StartNew();
+        using var seed = EdgeSeed(input);
+        var seedMilliseconds = watch.ElapsedMilliseconds;
+        if (!input.CopiesUnchanged()) throw new InvalidOperationException("COPIED_NATIVE_TARGET_CHANGED");
+        checkpoint();
+        if (!NativeCompareMeasure.Bounded(seed, out _)) throw new NativeCompareUnsupported("INVALID_OR_OVER_LIMIT_NATIVE_SEED");
+        var binding = NativeCompareSideBinding.CaptureSeed(seed, input);
+        var seedArchive = input.GeometryFingerprint(seed);
+        RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_STEP | recipe=EdgeSrfSeed | phase=Seed | construction_ms=" + seedMilliseconds
+            + " | next=SIDE0_FALSE_AND_TRUE_FROM_INDEPENDENT_IDENTICAL_COPIES | later_matches=NONE | other_recipes=NONE");
+        NativeCompareMeasure.ReportSides("EdgeSrfSeed", "Seed", seed, input, binding, checkpoint);
+        AddPreviewCopy("EdgeSrf:Seed:NOT_VERIFIED", seed, candidates);
+        NativeCompareProbeProtocol.RunIndependent(seed, original => original.DuplicateBrep(), (copy, reverse) =>
         {
-            foreach (var brep in breps) brep?.Dispose();
-            throw new NativeCompareUnsupported("UNSUPPORTED_BLEND_MULTIPLE_PATCHES");
-        }
-        return breps[0];
+            checkpoint();
+            if (input.GeometryFingerprint(copy) != seedArchive)
+                throw new InvalidOperationException("INDEPENDENT_SEED_ARCHIVE_MISMATCH");
+            RunSingleMatch(copy, reverse, input, binding, candidates, checkpoint);
+            if (input.GeometryFingerprint(seed) != seedArchive || !input.CopiesUnchanged())
+                throw new InvalidOperationException("SEED_OR_COPIED_NATIVE_TARGET_CHANGED");
+        });
     }
 
-    private static void RunRecipe(string name, Func<Brep> seed, int[] matchSides, NativeCompareInput input,
+    private static void RunSingleMatch(Brep copy, bool reverse, NativeCompareInput input, NativeCompareSideBinding binding,
         List<NativeCompareCandidate> candidates, Action checkpoint)
     {
+        var name = "Side0Reverse" + (reverse ? "True" : "False");
         var watch = Stopwatch.StartNew();
-        Brep? current = null;
-        var stage = "Seed";
-        var completedStage = "Seed";
-        var retain = false;
+        Brep? matched = null; Brep? unusedTarget = null;
         try
         {
+            RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_PROBE | recipe=" + name
+                + " | input=INDEPENDENT_IDENTICAL_EDGESRF_COPY | seed_archive=VERIFIED_EQUAL"
+                + " | target_side=" + NativeCompareProbeProtocol.TargetSide + " | match_count=1 | reverse_match=" + reverse);
+            NativeCompareMeasure.ReportSides(name, "Before", copy, input, binding, checkpoint);
+            var edge = binding.Resolve(copy, NativeCompareProbeProtocol.TargetSide)
+                ?? throw new NativeCompareUnsupported("UNSUPPORTED_UNIQUE_NATURAL_CANDIDATE_END");
+            var targets = input.Sides[NativeCompareProbeProtocol.TargetSide].Select(part => (Curve)part.Native).ToArray();
+            // Preserve actual native target owners and mixed edge directions. The only varying setting
+            // reverses the candidate edge to match; it does not certify or normalize target-chain orientation.
+            var settings = new MatchSrfSettings(Continuity.G2_continuous, Continuity.G2_continuous)
+            {
+                Average = false, MatchClosestPoints = false, PreserveIso = PreserveIsoCurveMethod.Automatic,
+                ReverseMatchDirection = reverse, ReverseAverageTargetDirection = false,
+            };
+            settings.EnableRefinement(false, input.Tolerance, input.AngleTolerance, 5.0);
+            RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_SETTINGS | recipe=" + name
+                + " | requested=G2 | other_end=G2_OPPOSITE_ONLY | average=false | refine=false"
+                + " | match_closest_points=false | preserve_iso=Automatic | reverse_match=" + reverse
+                + " | reverse_average_target=false | positional_tolerance=" + NativeCompareProbeProtocol.Number(input.Tolerance)
+                + " | angle_tolerance_radians=" + NativeCompareProbeProtocol.Number(input.AngleTolerance)
+                + " | native_curvature_radius_percent=5 | physical_W_gate=NOT_APPLIED"
+                + " | candidate_edge=" + edge.EdgeIndex + " | candidate_trim=" + NativeCompareSideBinding.Trim(edge).TrimIndex
+                + " | candidate_iso=" + NativeCompareSideBinding.Trim(edge).IsoStatus
+                + " | target_sequence=" + string.Join(",", input.Sides[NativeCompareProbeProtocol.TargetSide].Select(part => part.Label))
+                + " | target_chain_order=LOGICAL_CAPTURE_ORDER | target_native_directions=UNMODIFIED"
+                + " | reversal_semantics=CANDIDATE_EDGE_DIRECTION | target_chain_orientation=NOT_VERIFIED");
             checkpoint();
             var nativeWatch = Stopwatch.StartNew();
-            current = seed();
-            var operationMilliseconds = nativeWatch.ElapsedMilliseconds;
+            var returned = Brep.CreateFromMatch(edge, targets, settings, out matched, out unusedTarget);
+            var nativeMilliseconds = nativeWatch.ElapsedMilliseconds;
             if (!input.CopiesUnchanged()) throw new InvalidOperationException("COPIED_NATIVE_TARGET_CHANGED");
-            RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_STEP | recipe=" + name + " | step=Seed | construction_ms=" + operationMilliseconds);
+            RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_STEP | recipe=" + name + " | phase=MatchSide0"
+                + " | native_ms=" + nativeMilliseconds + " | returned=" + returned + " | reverse_match=" + reverse);
             checkpoint();
-            if (!NativeCompareMeasure.Bounded(current, out _)) throw new NativeCompareUnsupported("INVALID_OR_OVER_LIMIT_NATIVE_SEED");
-            NativeCompareMeasure.Report(name, stage, current, input, checkpoint);
-            retain = true;
-            foreach (var side in matchSides)
-            {
-                stage = "MatchSide" + side;
-                checkpoint();
-                var edge = ResolveNaturalCandidateEdge(current, input.Sides[side], input.Tolerance);
-                var targetRun = input.Sides[side];
-                var targets = targetRun.Select(e => (Curve)e.Native).ToArray();
-                var targetStart = targetRun[0].Start;
-                // These ARE copied owner BrepEdges, never detached DuplicateCurve G2 targets.
-                var settings = new MatchSrfSettings(Continuity.G2_continuous, Continuity.G2_continuous)
-                {
-                    Average = false, MatchClosestPoints = false, PreserveIso = PreserveIsoCurveMethod.Automatic,
-                    ReverseMatchDirection = edge.PointAtStart.DistanceTo(targetStart) > edge.PointAtEnd.DistanceTo(targetStart),
-                };
-                settings.EnableRefinement(false, input.Tolerance, input.AngleTolerance, 5.0);
-                Brep? matched = null; Brep? unusedTarget = null;
-                nativeWatch.Restart();
-                try
-                {
-                    var success = Brep.CreateFromMatch(edge, targets, settings, out matched, out unusedTarget);
-                    operationMilliseconds = nativeWatch.ElapsedMilliseconds;
-                    if (!input.CopiesUnchanged()) throw new InvalidOperationException("COPIED_NATIVE_TARGET_CHANGED");
-                    RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_STEP | recipe=" + name + " | step=" + stage
-                        + " | native_ms=" + operationMilliseconds + " | returned=" + success
-                        + " | requested=G2 | refine=false | match_closest_points=false | native_curvature_radius_percent=5"
-                        + " | reverse_match=" + settings.ReverseMatchDirection
-                        + " | target_chain_orientation=NATIVE_NOT_VERIFIED"
-                        + " | physical_W_gate=NOT_APPLIED | other_end=G2_OPPOSITE_ONLY | all_boundaries_rechecked=true");
-                    checkpoint();
-                    if (!success || matched is null) throw new NativeCompareUnsupported("NATIVE_MATCH_FAILED");
-                    if (!NativeCompareMeasure.Bounded(matched, out _)) throw new NativeCompareUnsupported("INVALID_OR_OVER_LIMIT_MATCH_RESULT");
-                    current.Dispose(); current = matched; matched = null;
-                    completedStage = stage;
-                    // Required after EVERY native Match: OtherEnd does not preserve adjacent boundaries.
-                    NativeCompareMeasure.Report(name, stage, current, input, checkpoint);
-                }
-                finally { matched?.Dispose(); unusedTarget?.Dispose(); }
-            }
+            if (!returned || matched is null) throw new NativeCompareUnsupported("NATIVE_MATCH_FAILED");
+            if (!NativeCompareMeasure.Bounded(matched, out _)) throw new NativeCompareUnsupported("INVALID_OR_OVER_LIMIT_MATCH_RESULT");
+            NativeCompareMeasure.ReportSides(name, "After", matched, input, binding, checkpoint);
+            AddPreviewCopy(name + ":AfterSingleMatch:NOT_VERIFIED", matched, candidates);
             RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_RECIPE | recipe=" + name
-                + " | status=NATIVE_CALLS_COMPLETED | elapsed_ms=" + watch.ElapsedMilliseconds + " | global_G2=NOT_VERIFIED");
+                + " | status=SINGLE_NATIVE_CALL_COMPLETED | elapsed_ms=" + watch.ElapsedMilliseconds
+                + " | physical_correspondence=NOT_VERIFIED | global_G2=NOT_VERIFIED");
         }
         catch (NativeCompareUnsupported exception)
         {
-            RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_RECIPE | recipe=" + name + " | step=" + stage
-                + " | status=" + exception.Message + " | elapsed_ms=" + watch.ElapsedMilliseconds + " | global_G2=NOT_VERIFIED");
+            RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_RECIPE | recipe=" + name + " | status=" + exception.Message
+                + " | elapsed_ms=" + watch.ElapsedMilliseconds + " | no_later_match=true | no_fallback=true");
         }
-        catch
-        {
-            retain = false;
-            throw;
-        }
-        finally
-        {
-            if (current is not null)
-            {
-                try
-                {
-                    if (retain && NativeCompareMeasure.Bounded(current, out _))
-                    {
-                        candidates.Add(new NativeCompareCandidate(name + ":last_output=" + completedStage + ":NOT_VERIFIED", current));
-                        current = null;
-                    }
-                }
-                finally { current?.Dispose(); }
-            }
-        }
+        finally { matched?.Dispose(); unusedTarget?.Dispose(); }
     }
 
-    private static BrepEdge ResolveNaturalCandidateEdge(Brep candidate, IReadOnlyList<NativeCompareInput.Edge> side, double tolerance)
+    private static void AddPreviewCopy(string name, Brep brep, List<NativeCompareCandidate> candidates)
     {
-        var start = side[0].Start; var end = side[side.Count - 1].End;
-        var matches = candidate.Edges.Where(edge => edge.Valence == EdgeAdjacency.Naked
-            && BoundaryMatchVerifier.IsNaturalBoundary(edge)
-            && NativeCompareMeasure.NaturalTrimLocus(edge.Brep.Trims[edge.TrimIndices()[0]])
-            && ((edge.PointAtStart.DistanceTo(start) <= tolerance && edge.PointAtEnd.DistanceTo(end) <= tolerance)
-                || (edge.PointAtStart.DistanceTo(end) <= tolerance && edge.PointAtEnd.DistanceTo(start) <= tolerance))).ToArray();
-        if (matches.Length != 1) throw new NativeCompareUnsupported("UNSUPPORTED_UNIQUE_NATURAL_CANDIDATE_END");
-        return matches[0];
+        var copy = brep.DuplicateBrep();
+        try
+        {
+            candidates.Add(new NativeCompareCandidate(name, copy));
+            copy = null!;
+        }
+        finally { copy?.Dispose(); }
     }
 
     private static void Preview(RhinoDoc doc, NativeCompareInput input, IReadOnlyList<NativeCompareCandidate> candidates)

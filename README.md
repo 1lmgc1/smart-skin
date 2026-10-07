@@ -1,8 +1,8 @@
-# Smart Skin — P08E1N1 native diagnostic
+# Smart Skin — P08E1N2 Match correspondence diagnostic
 
-Rhino8.21+ / Windows. Version **0.0.22-p08e1n1**.
+Rhino8.21+ / Windows. Version **0.0.23-p08e1n2**.
 
-N1 adds the separate read-only `SmartSkinNativeCompare` command to measure eligible native EdgeSrf/Blend/Match recipes on copied parent edges. It is a diagnostic comparison, not a replacement for `SmartSurfaceBuild` or a completed performance repair. See [native diagnostic instructions](docs/P08E1N1_NATIVE_OPERATOR_DIAGNOSTIC.md). Existing Build, Python geometry, handle ranges and installer algorithms are unchanged.
+N2 narrows the read-only `SmartSkinNativeCompare` command to one EdgeSrf seed and two independent first-Match attempts, using the documented reversal setting in each direction. It reports endpoint correspondence and each logical boundary before and after the operation. See [Match correspondence instructions](docs/P08E1N2_MATCH_CORRESPONDENCE.md). This is a diagnostic comparison; existing Build, Python geometry, handle ranges and installer algorithms are unchanged.
 
 This experimental field candidate repairs compound-edge recognition and constructs a boundary-preserving native skin with selectable U/V guide handles. Original source objects remain unchanged. Upper source corners may be hard at the two explicitly identified vertices; finite source intervals and generated joins receive no continuity exemption. Whole-skin numerical construction, selected-handle regressions and the bounded cap-cap screen pass. The actual Rhino owner-screen and interactive workflow remain a field-test boundary. Delivery requires successful exact-SHA Windows CI and its unchanged verified install ZIP.
 

@@ -84,74 +84,87 @@ internal static class NativeCompareMeasure
         return controlPoints <= 4096;
     }
 
-    internal static void Report(string recipe, string step, Brep candidate, NativeCompareInput input, Action checkpoint)
+    internal static void ReportSides(string recipe, string phase, Brep candidate, NativeCompareInput input,
+        NativeCompareSideBinding binding, Action checkpoint)
     {
         var watch = Stopwatch.StartNew();
         var bounded = Bounded(candidate, out var cp);
-        var boundary = candidate.Edges.Where(e => e.Valence == EdgeAdjacency.Naked).ToArray();
-        var targets = input.Edges.Select(e => e.Native).ToArray();
-        var coveredSources = new HashSet<BrepEdge>();
-        var coveredCandidates = new HashSet<BrepEdge>();
-        double gap = 0, normal = 0, fullW = 0, spectralW = 0;
-        var frames = 0; var samples = 0; var unresolved = 0; var gapFailures = 0;
-        if (bounded)
+        RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_BOUNDARY | recipe=" + recipe + " | phase=" + phase
+            + " | valid=" + candidate.IsValid + " | bounded=" + bounded + " | faces=" + candidate.Faces.Count
+            + " | control_points=" + cp + " | attribution=CONDITIONAL_NATURAL_PARAMETER_SIDE"
+            + " | physical_correspondence=NOT_VERIFIED | occupied_side=NOT_VERIFIED | parent_separation=NOT_VERIFIED");
+        binding.TraceCandidate(recipe, phase, candidate, input);
+        for (var side = 0; side < 4; side++)
         {
+            var edge = bounded ? binding.Resolve(candidate, side) : null;
+            if (edge is null)
+            {
+                RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_SIDE_RESULT | recipe=" + recipe + " | phase=" + phase
+                    + " | side=" + side + " | relation=" + NativeCompareProbeProtocol.Relation(side)
+                    + " | both_directions=NOT_VERIFIED_UNRESOLVED_NATURAL_SIDE | global_G2=NOT_VERIFIED");
+                continue;
+            }
             for (var pass = 0; pass < 2; pass++)
             {
-                var sources = pass == 0 ? targets : boundary;
-                var destinations = pass == 0 ? boundary : targets;
+                var metrics = new NativeCompareStationMetrics();
+                var targets = input.Sides[side].Select(part => part.Native).ToArray();
+                var sources = pass == 0 ? targets : new[] { edge };
+                var destinations = pass == 0 ? new[] { edge } : targets;
+                var sourceEdgesTouched = new HashSet<BrepEdge>();
+                var sourceEdgesWithG0 = new HashSet<BrepEdge>();
+                var candidateEdgesTouched = new HashSet<BrepEdge>();
                 foreach (var source in sources)
                 {
-                    // Fixed physical arc samples, including endpoints and near-end limits. No knot-driven samples
-                    // and no finite excluded band. Sampling is explicitly NOT an interval or G2 certificate.
-                    var parameters = new List<double>();
+                    var stations = new List<(double Parameter, bool Endpoint)>();
                     foreach (var fraction in Fractions())
                     {
-                        if (source.NormalizedLengthParameter(fraction, out var parameter)) parameters.Add(parameter);
-                        else unresolved++;
+                        var endpoint = fraction == 0 || fraction == 1;
+                        if (source.NormalizedLengthParameter(fraction, out var parameter)) stations.Add((parameter, endpoint));
+                        else metrics.UnresolvedStation(endpoint);
                     }
-                    var capturedSource = input.Edges.FirstOrDefault(e => ReferenceEquals(e.Native, source));
+                    var capturedSource = input.Edges.FirstOrDefault(part => ReferenceEquals(part.Native, source));
                     if (capturedSource is not null)
                         foreach (var feature in capturedSource.Features)
                         {
                             var offset = Math.Abs(source.Domain.Length) * 1e-8;
-                            parameters.Add(Math.Max(source.Domain.T0, feature - offset));
-                            parameters.Add(feature);
-                            parameters.Add(Math.Min(source.Domain.T1, feature + offset));
+                            stations.Add((Math.Max(source.Domain.T0, feature - offset), false));
+                            stations.Add((feature, false));
+                            stations.Add((Math.Min(source.Domain.T1, feature + offset), false));
                         }
-                    foreach (var parameter in parameters)
+                    foreach (var station in stations)
                     {
                         checkpoint();
-                        var point = source.PointAt(parameter);
+                        var point = source.PointAt(station.Parameter);
                         if (!Locate(point, destinations, input.Tolerance, out var target, out var targetParameter, out var distance))
-                        { unresolved++; continue; }
-                        samples++;
-                        gap = Math.Max(gap, distance);
-                        if (distance > input.Tolerance) { gapFailures++; continue; }
-                        coveredSources.Add(pass == 0 ? source : target);
-                        coveredCandidates.Add(pass == 0 ? target : source);
-                        if (!Frame(source, parameter, input.Tolerance, out var a)
-                            || !Frame(target, targetParameter, input.Tolerance, out var b)) { unresolved++; continue; }
-                        var dot = a.Normal * b.Normal;
-                        normal = Math.Max(normal, RhinoMath.ToDegrees(Math.Acos(Math.Min(1, Math.Abs(dot)))));
-                        fullW = Math.Max(fullW, NativeCompareMath.OperatorResidual(a.Operator, b.Operator, dot < 0 ? -1 : 1));
-                        spectralW = Math.Max(spectralW, NativeCompareMath.OperatorSpectralResidual(a.Operator, b.Operator, dot < 0 ? -1 : 1));
-                        frames++;
+                        { metrics.UnresolvedStation(station.Endpoint); continue; }
+                        metrics.LocatedStation(station.Endpoint, distance, input.Tolerance);
+                        var sourceEdge = pass == 0 ? source : target;
+                        sourceEdgesTouched.Add(sourceEdge);
+                        candidateEdgesTouched.Add(pass == 0 ? target : source);
+                        if (distance <= input.Tolerance) sourceEdgesWithG0.Add(sourceEdge);
+                        // Projected frames are measured even when separated, and explicitly distinguished
+                        // from frames whose point pair also meets G0. Neither is a continuity certificate.
+                        if (!Frame(source, station.Parameter, input.Tolerance, out var a)
+                            || !Frame(target, targetParameter, input.Tolerance, out var b))
+                        { metrics.FrameFailures++; continue; }
+                        var dot = Math.Max(-1, Math.Min(1, a.Normal * b.Normal));
+                        metrics.PairedFrame(dot, RhinoMath.ToDegrees(Math.Acos(Math.Abs(dot))),
+                            NativeCompareMath.OperatorSpectralResidual(a.Operator, b.Operator, dot < 0 ? -1 : 1),
+                            NativeCompareMath.OperatorResidual(a.Operator, b.Operator, dot < 0 ? -1 : 1), distance <= input.Tolerance);
                     }
                 }
+                RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_SIDE_RESULT | recipe=" + recipe + " | phase=" + phase
+                    + " | side=" + side + " | relation=" + NativeCompareProbeProtocol.Relation(side)
+                    + " | direction=" + (pass == 0 ? "SOURCE_TO_CANDIDATE" : "CANDIDATE_TO_SOURCE")
+                    + " | source_edges_touched=" + sourceEdgesTouched.Count + "/" + targets.Length
+                    + " | source_edges_with_any_G0_station=" + sourceEdgesWithG0.Count + "/" + targets.Length
+                    + " | candidate_edges_touched=" + candidateEdgesTouched.Count + "/1"
+                    + " | touched_does_not_mean_complete_coverage=true | " + metrics.Format()
+                    + " | finite_bands=NONE_EXCLUDED | corners=NOT_VERIFIED");
             }
         }
-        RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_BOUNDARY | recipe=" + recipe + " | step=" + step
-            + " | valid=" + candidate.IsValid + " | bounded=" + bounded + " | faces=" + candidate.Faces.Count
-            + " | control_points=" + cp + " | source_edge_coverage=" + coveredSources.Count + "/" + targets.Length
-            + " | candidate_edge_coverage=" + coveredCandidates.Count + "/" + boundary.Length
-            + " | arc_samples=" + samples + " | unresolved_samples=" + unresolved + " | gap_failures=" + gapFailures
-            + " | sampled_gap=" + (samples == 0 ? "NOT_VERIFIED" : Number(gap))
-            + " | normal_frames=" + frames + " | sampled_normal_degrees=" + (frames == 0 ? "NOT_VERIFIED" : Number(normal))
-            + " | sampled_full_W_frobenius_per_model_unit=" + (frames == 0 ? "NOT_VERIFIED" : Number(fullW))
-            + " | sampled_full_W_spectral_per_model_unit=" + (frames == 0 ? "NOT_VERIFIED" : Number(spectralW))
-            + " | finite_bands=NONE_EXCLUDED | corners=NOT_VERIFIED | occupied_side=NOT_VERIFIED"
-            + " | parent_separation=NOT_VERIFIED | global_G2=NOT_VERIFIED | measurement_ms=" + watch.ElapsedMilliseconds);
+        RhinoApp.WriteLine("SMARTSKIN_NATIVE_COMPARE_MEASURE_END | recipe=" + recipe + " | phase=" + phase
+            + " | measurement_ms=" + watch.ElapsedMilliseconds);
     }
 
     private static IEnumerable<double> Fractions()

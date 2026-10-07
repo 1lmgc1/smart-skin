@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
-    [string]$Version = "0.0.22-p08e1n1",
+    [string]$Version = "0.0.23-p08e1n2",
     [string]$Commit = 'local',
     [string]$OutputRoot = '',
     [switch]$InstallerScaffold
@@ -62,12 +62,13 @@ try {
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'docs/P08E1F6_NATIVE_CACHE_LATENCY.md') -Destination $Working
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'docs/P08E1F7_SLIDER_RECOVERY.md') -Destination $Working
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'docs/P08E1N1_NATIVE_OPERATOR_DIAGNOSTIC.md') -Destination $Working
+    Copy-Item -LiteralPath (Join-Path $RepoRoot 'docs/P08E1N2_MATCH_CORRESPONDENCE.md') -Destination $Working
     if (Test-Path -LiteralPath (Join-Path $RepoRoot 'docs/P08E1_CURVATURE_CONTROL.md')) { Copy-Item -LiteralPath (Join-Path $RepoRoot 'docs/P08E1_CURVATURE_CONTROL.md') -Destination $Working }
     foreach ($Name in @('INSTALL.cmd', 'UNINSTALL.cmd', 'Install-SmartSkin.ps1', 'Uninstall-SmartSkin.ps1', 'Installer-Common.ps1', 'Installer-Lifecycle.ps1', 'Test-Toolbar.ps1')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $Name) -Destination $Working
     }
     @(
-        "package=$PackageName", "version=$Version", 'patch=P08E1N1', "commit=$Commit", "configuration=$Configuration",
+        "package=$PackageName", "version=$Version", 'patch=P08E1N2', "commit=$Commit", "configuration=$Configuration",
         "ci_repository=$env:GITHUB_REPOSITORY", "ci_run_id=$env:GITHUB_RUN_ID", "ci_run_attempt=$env:GITHUB_RUN_ATTEMPT", "ci_ref=$env:GITHUB_REF",
         'installer=proven-current-hkcu', ('runtime_version=' + $script:SmartSkinRuntimeVersion), ('runtime_commit=' + $Commit), ('installer_commit=' + $Commit), 'minimum_rhino=8.21', 'target_framework=net48', 'geometry_runtime=Rhino-managed CPython >=3.9', 'python_packages=numpy==1.26.4;scipy==1.13.1;mpmath==1.3.0',
         'native_geometry=NOT VERIFIED', 'native_UI=NOT VERIFIED', 'automatic_Rhino_launch=False',
@@ -78,7 +79,7 @@ try {
         [ordered]@{ path = $_.FullName.Substring($Working.Length + 1).Replace('\', '/'); size = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     })
     Write-AtomicJson (Join-Path $Working 'manifest.json') ([ordered]@{
-        schema = 1; product = 'Smart Skin'; version = $Version; runtime_version = $script:SmartSkinRuntimeVersion; installer_revision = 'n1'; installer_commit = $Commit; runtime_commit = $Commit; patch = 'P08E1N1'; commit = $Commit
+        schema = 1; product = 'Smart Skin'; version = $Version; runtime_version = $script:SmartSkinRuntimeVersion; installer_revision = 'n2'; installer_commit = $Commit; runtime_commit = $Commit; patch = 'P08E1N2'; commit = $Commit
         feature_status = $FeatureStatus; plugin_guid = $script:SmartSkinGuid; minimum_rhino = '8.21'; target_framework = 'net48'
         runtime = [ordered]@{ rhino_cpython_min = '3.9'; packages = [ordered]@{ numpy = '1.26.4'; scipy = '1.13.1'; mpmath = '1.3.0' } }
         verification = 'NOT VERIFIED: native Rhino geometry, loading and UI'; assemblies = $Assemblies; files = $Files

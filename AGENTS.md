@@ -108,3 +108,10 @@ dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --
 - Native Match uses copied parent BrepEdges, Average=false, with all-boundary metrics after each operation. Requested G2 and native curvature-percent settings are not physical residual proofs. No automatic refinement/search loop or silent Patch fallback.
 - Candidate previews are disposable and read-only. There is no Add, export or accept path in this diagnostic. Source and copied-owner archive integrity, bounded complexity and cancellation between native calls are mandatory.
 - Report sampled full ambient shape-operator metrics, native eligibility and operation time separately from unverified global G2, oriented continuation and separation. Actual native API execution remains a field test.
+
+## P08E1N2 first-Match correspondence diagnostic
+
+- Version `0.0.23-p08e1n2` narrows the separate read-only command to one source-derived EdgeSrf seed and two independent first-side Match attempts with ReverseMatchDirection=false/true. Do not apply a second Match or add unrelated recipes.
+- Preserve copied parent BrepEdge context. Report native and logical endpoint/domain directions, selected target trim provenance and candidate correspondence. Reversal variants are diagnostic probes, not a guarantee that compound target directions are normalized.
+- Measure every logical side before and after each attempt, with direction, unresolved correspondence and finite-sampling limitations explicit. Requested G2, returned=true and a nonempty edge-coverage counter are not a verified attachment.
+- Keep source/copy integrity, read-only disposal, unchanged Build/installer behavior and exact-SHA Windows CI delivery. Do not publish private model coordinates or field files.

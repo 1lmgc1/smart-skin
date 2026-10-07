@@ -373,7 +373,7 @@ internal sealed class NativeCompareInput : IDisposable
         var bytes = Encoding.UTF8.GetBytes(GeometryFingerprint(obj.Geometry) + "\n" + obj.Attributes.ToJSON(_serialization));
         return Convert.ToBase64String(sha.ComputeHash(bytes));
     }
-    private string GeometryFingerprint(GeometryBase geometry)
+    internal string GeometryFingerprint(GeometryBase geometry)
     {
         // Canonicalize lazy caches on a fresh disposable copy, never on the document owner.
         using var snapshot = geometry.Duplicate();
