@@ -181,11 +181,6 @@ internal sealed class NativeCompareInput : IDisposable
             if (!SmoothContinuation(ordered[(i + ordered.Count - 1) % ordered.Count], ordered[i])) corners.Add(i);
         if (corners.Count != 4)
             throw new NativeCompareUnsupported("UNSUPPORTED_FOUR_CHAIN_CELL_REQUIRED;geometric_breaks=" + corners.Count);
-        // Canonical corner and traversal depend on geometry, never selection order or split count.
-        var first = corners.OrderBy(i => ordered[i].Start.X).ThenBy(i => ordered[i].Start.Y)
-            .ThenBy(i => ordered[i].Start.Z).First();
-        var rotation = corners.IndexOf(first);
-        corners = Enumerable.Range(0, 4).Select(i => corners[(i + rotation) % 4]).ToList();
         for (var c = 0; c < 4; c++)
         {
             var side = new List<Edge>();
@@ -202,13 +197,24 @@ internal sealed class NativeCompareInput : IDisposable
 
     private void CanonicalizeSides()
     {
-        var first = Enumerable.Range(0, 4).OrderBy(i => Sides[i][0].Start.X)
-            .ThenBy(i => Sides[i][0].Start.Y).ThenBy(i => Sides[i][0].Start.Z).First();
+        // Every adjacent endpoint pair was uniquely verified in OrderAndPartition.
+        // Use both incident endpoints for sort keys only, so reversing the walk cannot
+        // substitute a slightly different native endpoint. Geometry and roles stay intact.
+        var incoming = new NativeCompareCornerPoint[4];
+        var outgoing = new NativeCompareCornerPoint[4];
+        for (var side = 0; side < 4; side++)
+        {
+            var previous = Sides[(side + 3) % 4];
+            var a = previous[previous.Count - 1].End;
+            var b = Sides[side][0].Start;
+            incoming[side] = new NativeCompareCornerPoint(a.X, a.Y, a.Z);
+            outgoing[side] = new NativeCompareCornerPoint(b.X, b.Y, b.Z);
+        }
+        if (!NativeCompareCornerOrdering.TryChoose(incoming, outgoing, out var first, out var reverse))
+            throw new NativeCompareUnsupported("UNSUPPORTED_AMBIGUOUS_CANONICAL_CORNERS");
         var rotated = Enumerable.Range(0, 4).Select(i => Sides[(first + i) % 4]).ToArray();
         Sides.Clear(); Sides.AddRange(rotated);
-        var next = Sides[1][0].Start;
-        var previous = Sides[3][0].Start;
-        if (Compare(next, previous) > 0)
+        if (reverse)
         {
             Sides.Reverse();
             foreach (var side in Sides)
@@ -316,12 +322,6 @@ internal sealed class NativeCompareInput : IDisposable
         return edges.All(e => e.Native.IsLinear(Tolerance)
             && Vector3d.CrossProduct(e.Start - start, direction).Length <= Tolerance
             && Vector3d.CrossProduct(e.End - start, direction).Length <= Tolerance);
-    }
-
-    private static int Compare(Point3d a, Point3d b)
-    {
-        var x = a.X.CompareTo(b.X); if (x != 0) return x;
-        var y = a.Y.CompareTo(b.Y); return y != 0 ? y : a.Z.CompareTo(b.Z);
     }
 
     private bool SmoothContinuation(Edge a, Edge b)

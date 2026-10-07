@@ -123,3 +123,11 @@ dotnet test tests\SmartSkin.Core.Tests\SmartSkin.Core.Tests.csproj -c Release --
 - Show one folder chooser after native cleanup; saving and dialog time must not consume the native-work budget. Picker cancellation and file errors retain the last completed report for `SmartSkinNativeReport` without rerunning geometry.
 - Use collision-safe file creation, explicit completeness/error status and bounded capture with a reserved final cleanup/status tail. Never silently overwrite an existing file or label a truncated report complete. Do not upload reports automatically.
 - Preserve exact-SHA Windows CI, tested installation and the distinction between managed file-writing tests and unverified native folder-dialog behavior.
+
+## P08E1N4 native support and conditional trim
+
+- Version `0.0.25-p08e1n4` adds stable paired-corner sorting and a bounded support-first experiment to the read-only native diagnostic. Do not replace ordinary Build with a basic G0 surface or claim this experiment solves its performance/attachment requirements.
+- Distinguish candidate-edge distance from original-curve incidence on the underlying support. Qualify parent normal/full-operator checks by independent incidence. Preserve the historical physical tolerance through original-curve calibration only; a larger hull extent is informational, never a new veto.
+- Only specifically role-bound upper source points retain the existing exception. No finite band, lower point or internal junction is exempt. Preserve original parents and their trims strictly.
+- Split only a new support using the original finite 3D source curves. Inspect actual trim loops, unique complete region correspondence and both directions of original-boundary coverage, then recheck the actual trimmed boundary and parent jets. No projected/extruded cutters, largest-fragment choice, raised tolerance or hidden fallback.
+- Keep support precheck, trimming and final recheck outcomes separate. This diagnostic has no Add/accept path; finite screens do not certify global G2, branch uniqueness or separation. Preserve the N3 TXT flow, Python runtime, installer algorithms and exact-SHA Windows CI pipeline.

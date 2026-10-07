@@ -82,9 +82,10 @@ public sealed class SmartSkinNativeCompareCommand : Command
             RhinoApp.EscapeKeyPressed += Escape;
             write("SMARTSKIN_NATIVE_COMPARE_START | version=" + identity.Version + " | commit=" + identity.Commit
                 + " | experimental=true | document_additions=0 | requested=G2 | average=false"
-                + " | protocol=N2_FIRST_MATCH_REVERSAL | target_side=0 | independent_seed_copies=true"
-                + " | max_construction_calls=" + NativeCompareProbeProtocol.MaximumConstructionCalls + " | budget_ms=" + BudgetMilliseconds
-                + " | cancellation=BETWEEN_NATIVE_CALLS | upper_exceptions=NONE_GRANTED | global_G2=NOT_VERIFIED");
+                + " | protocol=INDEPENDENT_MATCH_SUPPORT_TRIM_LOCAL | target_side=0 | independent_seed_copies=true"
+                + " | max_initial_construction_calls=" + NativeCompareProbeProtocol.MaximumConstructionCalls
+                + " | max_support_blend_calls=1 | max_new_support_split_calls=2 | support_trim_experiment=true" + " | budget_ms=" + BudgetMilliseconds
+                + " | cancellation=BETWEEN_NATIVE_CALLS | upper_point_policy=EXACT_IDENTIFIED_SOURCE_ROLE_POINTS_ONLY | global_G2=NOT_VERIFIED");
             input = NativeCompareInput.Capture(doc, selection, Checkpoint);
             write("SMARTSKIN_NATIVE_COMPARE_PLAN | ordered_cells=1 | logical_sides=4 | native_edges=" + input.Edges.Count
                 + " | owner_count=" + input.Owners.Count + " | derivation=" + input.Derivation + " | knot_features=false"
@@ -175,22 +176,29 @@ public sealed class SmartSkinNativeCompareCommand : Command
         var binding = NativeCompareSideBinding.CaptureSeed(seed, input);
         var seedArchive = input.GeometryFingerprint(seed);
         write("SMARTSKIN_NATIVE_COMPARE_STEP | recipe=EdgeSrfSeed | phase=Seed | construction_ms=" + seedMilliseconds
-            + " | next=SIDE0_FALSE_AND_TRUE_FROM_INDEPENDENT_IDENTICAL_COPIES | later_matches=NONE | other_recipes=NONE");
+            + " | next=SIDE0_FALSE_AND_TRUE_FROM_INDEPENDENT_IDENTICAL_COPIES | later_matches=NONE | next_stage=BOUNDED_SUPPORT_TRIM");
         NativeCompareMeasure.ReportSides("EdgeSrfSeed", "Seed", seed, input, binding, checkpoint, write);
         AddPreviewCopy("EdgeSrf:Seed:NOT_VERIFIED", seed, candidates);
-        NativeCompareProbeProtocol.RunIndependent(seed, original => original.DuplicateBrep(), (copy, reverse) =>
+        var matchSupports = new List<NativeSupportCandidate>();
+        try
         {
-            checkpoint();
-            if (input.GeometryFingerprint(copy) != seedArchive)
-                throw new InvalidOperationException("INDEPENDENT_SEED_ARCHIVE_MISMATCH");
-            RunSingleMatch(copy, reverse, input, binding, candidates, checkpoint, write);
-            if (input.GeometryFingerprint(seed) != seedArchive || !input.CopiesUnchanged())
-                throw new InvalidOperationException("SEED_OR_COPIED_NATIVE_TARGET_CHANGED");
-        });
+            NativeCompareProbeProtocol.RunIndependent(seed, original => original.DuplicateBrep(), (copy, reverse) =>
+            {
+                checkpoint();
+                if (input.GeometryFingerprint(copy) != seedArchive)
+                    throw new InvalidOperationException("INDEPENDENT_SEED_ARCHIVE_MISMATCH");
+                RunSingleMatch(copy, reverse, input, binding, candidates, matchSupports, checkpoint, write);
+                if (input.GeometryFingerprint(seed) != seedArchive || !input.CopiesUnchanged())
+                    throw new InvalidOperationException("SEED_OR_COPIED_NATIVE_TARGET_CHANGED");
+            });
+            NativeSupportTrimExperiment.Run(input, binding, matchSupports, candidates, checkpoint, write);
+            if (!input.CopiesUnchanged()) throw new InvalidOperationException("COPIED_NATIVE_TARGET_CHANGED");
+        }
+        finally { foreach (var support in matchSupports) support.Dispose(); }
     }
 
     private static void RunSingleMatch(Brep copy, bool reverse, NativeCompareInput input, NativeCompareSideBinding binding,
-        List<NativeCompareCandidate> candidates, Action checkpoint, Action<string> write)
+        List<NativeCompareCandidate> candidates, List<NativeSupportCandidate> matchSupports, Action checkpoint, Action<string> write)
     {
         var name = "Side0Reverse" + (reverse ? "True" : "False");
         var watch = Stopwatch.StartNew();
@@ -235,6 +243,7 @@ public sealed class SmartSkinNativeCompareCommand : Command
             if (!NativeCompareMeasure.Bounded(matched, out _)) throw new NativeCompareUnsupported("INVALID_OR_OVER_LIMIT_MATCH_RESULT");
             NativeCompareMeasure.ReportSides(name, "After", matched, input, binding, checkpoint, write);
             AddPreviewCopy(name + ":AfterSingleMatch:NOT_VERIFIED", matched, candidates);
+            matchSupports.Add(new NativeSupportCandidate(name, matched.DuplicateBrep()));
             write("SMARTSKIN_NATIVE_COMPARE_RECIPE | recipe=" + name
                 + " | status=SINGLE_NATIVE_CALL_COMPLETED | elapsed_ms=" + watch.ElapsedMilliseconds
                 + " | physical_correspondence=NOT_VERIFIED | global_G2=NOT_VERIFIED");

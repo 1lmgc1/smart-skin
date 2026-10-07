@@ -1,9 +1,9 @@
 # Shared by the extracted Windows package. Requires Windows PowerShell 5.1 (64-bit).
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$script:SmartSkinVersion = '0.0.24-p08e1n3'
-$script:SmartSkinRuntimeVersion = '0.0.24-p08e1n3'
-$script:SmartSkinInstallerRevision = 'n3'
+$script:SmartSkinVersion = '0.0.25-p08e1n4'
+$script:SmartSkinRuntimeVersion = '0.0.25-p08e1n4'
+$script:SmartSkinInstallerRevision = 'n4'
 $script:SmartSkinGuid = 'b3f42f21-1f15-45e6-9bc2-a68b0b27c877'
 $script:SmartSkinRegistryBase = 'HKCU:\Software\McNeel\Rhinoceros\8.0\Plug-ins'
 $script:SmartSkinLog = $null
@@ -105,7 +105,7 @@ function Assert-Package([string]$Root) {
     $ManifestPath = Join-Path $Root 'manifest.json'
     if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) { throw 'Package is incomplete: manifest.json is missing. Extract the complete ZIP before running INSTALL.cmd.' }
     $Manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
-    if ($Manifest.schema -ne 1 -or $Manifest.product -ne 'Smart Skin' -or $Manifest.patch -ne 'P08E1N3' -or $Manifest.feature_status -notin @('EXPERIMENTAL_NATIVE_CURVATURE', 'INSTALLER_SCAFFOLD_INCOMPLETE') -or $Manifest.version -ne $script:SmartSkinVersion -or $Manifest.runtime_version -ne $script:SmartSkinRuntimeVersion -or $Manifest.installer_revision -ne $script:SmartSkinInstallerRevision -or $Manifest.installer_commit -notmatch '^[a-f0-9]{40}$' -or $Manifest.runtime_commit -notmatch '^[a-f0-9]{40}$' -or $Manifest.plugin_guid -ne $script:SmartSkinGuid -or $Manifest.target_framework -ne 'net48' -or $Manifest.minimum_rhino -ne '8.21') { throw 'Package identity or compatibility manifest mismatch.' }
+    if ($Manifest.schema -ne 1 -or $Manifest.product -ne 'Smart Skin' -or $Manifest.patch -ne 'P08E1N4' -or $Manifest.feature_status -notin @('EXPERIMENTAL_NATIVE_CURVATURE', 'INSTALLER_SCAFFOLD_INCOMPLETE') -or $Manifest.version -ne $script:SmartSkinVersion -or $Manifest.runtime_version -ne $script:SmartSkinRuntimeVersion -or $Manifest.installer_revision -ne $script:SmartSkinInstallerRevision -or $Manifest.installer_commit -notmatch '^[a-f0-9]{40}$' -or $Manifest.runtime_commit -notmatch '^[a-f0-9]{40}$' -or $Manifest.plugin_guid -ne $script:SmartSkinGuid -or $Manifest.target_framework -ne 'net48' -or $Manifest.minimum_rhino -ne '8.21') { throw 'Package identity or compatibility manifest mismatch.' }
     if ($Manifest.runtime_commit -ne $Manifest.commit -or $Manifest.installer_commit -ne $Manifest.commit) { throw 'Runtime/source commit identity mismatch.' }
     $Listed = @{}
     foreach ($File in $Manifest.files) {
@@ -125,7 +125,7 @@ function Assert-Package([string]$Root) {
             if ($Relative -ne 'manifest.json' -and -not $Listed.ContainsKey($Relative)) { throw "Unlisted package file: $Relative" }
         }
     }
-    foreach ($Name in @('net48/SmartSkin.Rhino8.rhp', 'net48/SmartSkin.Core.dll', 'net48/SmartSkin.Rhino8.rui', 'INSTALL.cmd', 'UNINSTALL.cmd', 'Install-SmartSkin.ps1', 'Uninstall-SmartSkin.ps1', 'Installer-Common.ps1', 'Installer-Lifecycle.ps1', 'Test-Toolbar.ps1', 'INSTALL_CURVATURE_RU.md', 'P08E1F2_PIPELINE_REPAIR.md', 'P08E1F3_COMPOUND_EDGE_REPAIR.md', 'P08E1F3_NATIVE_OWNER_SCREEN.md', 'P08E1F4_NATIVE_FRAME_REPAIR.md', 'P08E1F5_PREVIEW_INTERACTION.md', 'P08E1F6_NATIVE_CACHE_LATENCY.md', 'P08E1F7_SLIDER_RECOVERY.md', 'P08E1N1_NATIVE_OPERATOR_DIAGNOSTIC.md', 'P08E1N2_MATCH_CORRESPONDENCE.md', 'P08E1N3_FULL_TEXT_REPORT.md', 'build-info.txt')) {
+    foreach ($Name in @('net48/SmartSkin.Rhino8.rhp', 'net48/SmartSkin.Core.dll', 'net48/SmartSkin.Rhino8.rui', 'INSTALL.cmd', 'UNINSTALL.cmd', 'Install-SmartSkin.ps1', 'Uninstall-SmartSkin.ps1', 'Installer-Common.ps1', 'Installer-Lifecycle.ps1', 'Test-Toolbar.ps1', 'INSTALL_CURVATURE_RU.md', 'P08E1F2_PIPELINE_REPAIR.md', 'P08E1F3_COMPOUND_EDGE_REPAIR.md', 'P08E1F3_NATIVE_OWNER_SCREEN.md', 'P08E1F4_NATIVE_FRAME_REPAIR.md', 'P08E1F5_PREVIEW_INTERACTION.md', 'P08E1F6_NATIVE_CACHE_LATENCY.md', 'P08E1F7_SLIDER_RECOVERY.md', 'P08E1N1_NATIVE_OPERATOR_DIAGNOSTIC.md', 'P08E1N2_MATCH_CORRESPONDENCE.md', 'P08E1N3_FULL_TEXT_REPORT.md', 'P08E1N4_SUPPORT_TRIM.md', 'build-info.txt')) {
         if (-not $Listed.ContainsKey($Name)) { throw "Required manifest file missing: $Name" }
     }
     if ($Manifest.feature_status -eq 'EXPERIMENTAL_NATIVE_CURVATURE') {
